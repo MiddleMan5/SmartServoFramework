@@ -1,0 +1,110 @@
+# SmartServoFramework "examples" build system
+# This file allows you to build the test programs bundled SmartServoFramework
+
+# http://www.scons.org/
+# http://www.scons.org/wiki/IDEIntegration
+
+import sys
+import subprocess
+from distutils.version import StrictVersion
+
+
+# Initialize the environment
+################################################################################
+
+if ARGUMENTS.get('debug', 0):
+    print "> DEBUG build"
+    env = Environment(CCFLAGS = ' -g -Wall -Wextra -Wno-unused-parameter ')
+else:
+    env = Environment(CCFLAGS = ' -O2 -Wno-unused-parameter ')
+
+
+# Multiplatform build
+################################################################################
+
+if sys.platform.startswith('linux') == True:
+
+    print '> LINUX platform'
+    CC_VERSION = subprocess.check_output([env['CC'], "-dumpversion"]).strip('\n')
+    if env['CC'] == 'gcc':
+        print '> Gcc ' + CC_VERSION + ' compiler'
+        if StrictVersion(CC_VERSION) < StrictVersion('4.6'):
+            print 'You need at least GCC 4.6+ to use C++11 features!'
+            exit(0)
+        elif StrictVersion(CC_VERSION) < StrictVersion('4.8'):
+            # GCC 4.6 needs a different flag to enable C++11
+            env.Append(CCFLAGS = "-std=c++0x -pthread ")
+        else:
+            env.Append(CCFLAGS = "-std=c++11 -pthread ")
+    elif env['CC'] == 'clang':
+        print '> LLVM ' + CC_VERSION + ' compiler'
+        env.Append(CCFLAGS = "-std=c++11 ")
+    else:
+        print '> WARNING > Unknown compiler > ' + env['CC']
+        exit(0)
+
+    # Additional libraries
+    libraries = ['pthread', 'lockdev']
+    libraries_paths = ['']
+
+elif sys.platform.startswith('win') == True:
+
+    print '> WINDOWS platform'
+    if env['CC'] == 'MVS':
+        print '> Visual Studio compiler'
+        env.Append(CCFLAGS = "-std=c++11 ")
+        env.Append(tools = "msvc")
+    elif env['CC'] == 'gcc':
+        print '> MinGW compiler'
+        env.Append(CCFLAGS = "-std=c++11 -pthread -winpthreads ")
+    else:
+        print '> WARNING > Unknown compiler > ' + env['CC']
+
+    # Additional libraries
+    libraries = ['']
+    libraries_paths = ['']
+
+elif sys.platform == 'darwin':
+
+    print '> MAC OS X platform'
+    if env['CC'] == 'gcc':
+        print '> Gcc compiler'
+        env.Append(CCFLAGS = "-std=c++11 -stdlib=libstdc++")
+        env.Append(LFLAGS = "-F /System/Library/Frameworks/ -f IOKit")
+    elif env['CC'] == 'clang':
+        print '> LLVM compiler'
+        env.Append(CCFLAGS = "-std=c++11 -stdlib=libc++ ")
+    else:
+        print '> WARNING > Unknown compiler > ' + env['CC']
+
+    # Additional libraries
+    libraries = ['']
+    libraries_paths = ['']
+
+else:
+    print '> WARNING > Unknown operating system > ' + sys.platform
+
+
+# For these test programs, we will use the framework source files directly
+# Framework sources will be copied into the 'build' directory and build artifacts will be stored there
+################################################################################
+
+env.BuildDir('build/', '../src/')
+
+src_framework = [env.Object("build/SerialPort.cpp"), env.Object("build/SerialPortLinux.cpp"), env.Object("build/SerialPortMacOS.cpp"), env.Object("build/SerialPortWindows.cpp"),
+                 env.Object("build/minitraces.cpp"), env.Object("build/ControlTables.cpp"), env.Object("build/Utils.cpp"), env.Object("build/ControllerAPI.cpp"),env.Object("build/Servo.cpp"),
+                 env.Object("build/Dynamixel.cpp"), env.Object("build/DynamixelTools.cpp"), env.Object("build/DynamixelSimpleAPI.cpp"), env.Object("build/DynamixelController.cpp"),
+                 env.Object("build/ServoDynamixel.cpp"), env.Object("build/ServoAX.cpp"), env.Object("build/ServoEX.cpp"), env.Object("build/ServoMX.cpp"), env.Object("build/ServoXL.cpp"),
+                 env.Object("build/HerkuleX.cpp"), env.Object("build/HerkuleXTools.cpp"), env.Object("build/HerkuleXSimpleAPI.cpp"), env.Object("build/HerkuleXController.cpp"),
+                 env.Object("build/ServoHerkuleX.cpp"), env.Object("build/ServoDRS.cpp")]
+
+
+# Build test programs
+################################################################################
+
+env.Program(target = 'ex_basic_test', source = ["ex_basic_test.cpp", src_framework], LIBS = libraries, LIBPATH = libraries_paths)
+env.Program(target = 'ex_simple', source = ["ex_simple.cpp"] + src_framework, LIBS = libraries, LIBPATH = libraries_paths)
+env.Program(target = 'ex_simple_threaded', source = ["ex_simple_threaded.cpp"] + src_framework, LIBS = libraries, LIBPATH = libraries_paths)
+env.Program(target = 'ex_controller', source = ["ex_controller.cpp"] + src_framework, LIBS = libraries, LIBPATH = libraries_paths)
+env.Program(target = 'ex_sinus_control', source = ["ex_sinus_control.cpp"] + src_framework, LIBS = libraries + ["opencv_core", "opencv_highgui"], LIBPATH = libraries_paths)
+env.Program(target = 'ex_advance_scanner', source = ["ex_advance_scanner.cpp"] + src_framework, LIBS = libraries, LIBPATH = libraries_paths)
