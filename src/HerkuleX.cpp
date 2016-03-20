@@ -255,7 +255,7 @@ void HerkuleX::hkx_tx_packet()
     }
 
     // Set a timeout for the response packet
-    // Min size for an RX packet is 9
+    // Min size of an RX packet is 9
     if (txPacket[PKT_CMD] == CMD_EEP_READ || txPacket[PKT_CMD] == CMD_RAM_READ)
     {
         serial->setTimeOut(9 + txPacket[PKT_DATA+1]);
@@ -293,7 +293,7 @@ void HerkuleX::hkx_rx_packet()
     // Minimum status packet size estimation
     if (commStatus == COMM_TXSUCCESS)
     {
-        // Min size for an RX packet is 9
+        // Min size of an RX packet is 9
         rxPacketSize = 9;
         rxPacketSizeReceived = 0;
     }
@@ -612,13 +612,22 @@ int HerkuleX::hkx_get_com_status()
 
 int HerkuleX::hkx_get_com_error()
 {
-    int error = 0;
-    if (commStatus > COMM_RXSUCCESS)
+    if (commStatus < 0)
     {
-        error = commStatus;
+        return commStatus;
     }
 
-    return error;
+    return 0;
+}
+
+int HerkuleX::hkx_get_com_error_count()
+{
+    if (commStatus < 0)
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 int HerkuleX::hkx_print_error()
@@ -662,6 +671,10 @@ int HerkuleX::hkx_print_error()
             TRACE_ERROR(HKX, "[#%i] Protocol Error: ERRBIT_DRIVER_FAULT\n", id);
         if (error & ERRBIT_EEP_REG_DIST)
             TRACE_ERROR(HKX, "[#%i] Protocol Error: ERRBIT_EEP_REG_DIST\n", id);
+        break;
+
+    case COMM_UNKNOWN:
+        TRACE_ERROR(HKX, "[#%i] COMM_UNKNOWN: Unknown communication error!\n", id);
         break;
 
     case COMM_TXFAIL:
@@ -878,6 +891,10 @@ int HerkuleX::hkx_read_byte(const int id, const int address, const int register_
         {
             value = static_cast<int>(rxPacket[PKT_DATA+2]);
         }
+        else
+        {
+            value = commStatus;
+        }
     }
 
     return value;
@@ -935,6 +952,10 @@ int HerkuleX::hkx_read_word(const int id, const int address, const int register_
             if (commStatus == COMM_RXSUCCESS)
             {
                 value = make_short_word(rxPacket[PKT_DATA+2], rxPacket[PKT_DATA+3]);
+            }
+            else
+            {
+                value = commStatus;
             }
         }
     }

@@ -308,7 +308,7 @@ void Dynamixel::dxl_tx_packet()
     // Set a timeout for the response packet
     if (protocolVersion == 2)
     {
-        // 11 is the min size for a v2 status packet
+        // 11 is the min size of a v2 status packet
         if (txPacket[PKT1_INSTRUCTION] == INST_READ)
         {
             serial->setTimeOut(11 + make_short_word(txPacket[PKT2_PARAMETER+2], txPacket[PKT2_PARAMETER+3]));
@@ -320,7 +320,7 @@ void Dynamixel::dxl_tx_packet()
     }
     else
     {
-        // 6 is the min size for a v1 status packet
+        // 6 is the min size of a v1 status packet
         if (txPacket[PKT1_INSTRUCTION] == INST_READ)
         {
             serial->setTimeOut(6 + txPacket[PKT1_PARAMETER+1]);
@@ -360,7 +360,7 @@ void Dynamixel::dxl_rx_packet()
     // Minimum status packet size estimation
     if (commStatus == COMM_TXSUCCESS)
     {
-        // Min size for protocol v2 is 11, for v1 is 6
+        // Min size with protocol v2 is 11, for v1 is 6
         (protocolVersion == 2) ? rxPacketSize = 11 : rxPacketSize = 6;
         rxPacketSizeReceived = 0;
     }
@@ -917,13 +917,22 @@ int Dynamixel::dxl_get_com_status()
 
 int Dynamixel::dxl_get_com_error()
 {
-    int error = 0;
-    if (commStatus > COMM_RXSUCCESS)
+    if (commStatus < 0)
     {
-        error = commStatus;
+        return commStatus;
     }
 
-    return error;
+    return 0;
+}
+
+int Dynamixel::dxl_get_com_error_count()
+{
+    if (commStatus < 0)
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 int Dynamixel::dxl_print_error()
@@ -985,6 +994,10 @@ int Dynamixel::dxl_print_error()
             if (error & ERRBIT1_INSTRUCTION)
                 TRACE_ERROR(DXL, "[#%i] Protocol Error: Instruction code error!\n", id);
         }
+        break;
+
+    case COMM_UNKNOWN:
+        TRACE_ERROR(DXL, "[#%i] COMM_UNKNOWN: Unknown communication error!\n", id);
         break;
 
     case COMM_TXFAIL:
@@ -1252,6 +1265,10 @@ int Dynamixel::dxl_read_byte(const int id, const int address, const int ack)
                     value = static_cast<int>(rxPacket[PKT1_PARAMETER]);
                 }
             }
+            else
+            {
+                value = commStatus;
+            }
         }
     }
 
@@ -1335,6 +1352,10 @@ int Dynamixel::dxl_read_word(const int id, const int address, const int ack)
                 {
                     value = make_short_word(rxPacket[PKT1_PARAMETER], rxPacket[PKT1_PARAMETER+1]);
                 }
+            }
+            else
+            {
+                value = commStatus;
             }
         }
     }
