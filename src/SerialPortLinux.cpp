@@ -566,6 +566,11 @@ int SerialPortLinux::tx(unsigned char *packet, int packetLength)
 {
     int writeStatus = -1;
 
+//Sets GPIO to value value dependent on inversion mode
+    if(serialDevice = SERIAL_HARDWARE){
+      writeHardware(!hardwareInverted);
+    }
+
     if (isOpen() == true)
     {
         if (packet != nullptr && packetLength > 0)
@@ -593,6 +598,10 @@ int SerialPortLinux::tx(unsigned char *packet, int packetLength)
 int SerialPortLinux::rx(unsigned char *packet, int packetLength)
 {
     int readStatus = -1;
+
+    if(serialDevice = SERIAL_HARDWARE){
+      writeHardware(hardwareInverted);
+    }
 
     if (isOpen() == true)
     {
@@ -629,6 +638,54 @@ void SerialPortLinux::flush()
 
         tcflush(ttyDeviceFileDescriptor, TCIFLUSH);
     }
+}
+
+ void SerialPortLinux::writeHardware(bool state)
+ {
+   int hardwareControl = hardwarePin;
+   volatile void *gpio_addr = NULL;
+   volatile unsigned int *gpio_oe_addr = NULL;
+   volatile unsigned int *gpio_setdataout_addr = NULL;
+   volatile unsigned int *gpio_cleardataout_addr = NULL;
+   unsigned int reg;
+
+ int fd = open("/dev/mem", O_RDWR);
+   gpio_addr = mmap(0, GPIO1_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, GPIO1_START_ADDR);
+   gpio_oe_addr = gpio_addr + GPIO_OE;
+   gpio_setdataout_addr = gpio_addr + GPIO_SETDATAOUT;
+   gpio_cleardataout_addr = gpio_addr + GPIO_CLEARDATAOUT;
+
+   if(gpio_addr == MAP_FAILED) {
+       exit(1);
+   }
+
+   reg = *gpio_oe_addr;
+   reg = reg & (0xFFFFFFFF - PIN);
+   *gpio_oe_addr = reg;
+
+   if(state){
+     *gpio_setdataout_addr= PIN; //HIGH
+   }
+   else {
+     *gpio_cleardataout_addr = PIN; //LOW
+   }
+ }
+
+ int SerialPortLinux::getHardwarePin()
+ {
+   return hardwarePin;
+ }
+
+ void SerialPortLinux::setHardwareInverted(bool &hardwareInverted)
+ {
+   hardwareInverted = !hardwareInverted;
+ }
+
+void SerialPortLinux::writeHardware(bool state)
+{
+
+
+
 }
 
 double SerialPortLinux::getTime()

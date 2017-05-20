@@ -58,6 +58,7 @@ enum SerialDevices_e
     SERIAL_BT100         = 4,   //!< BT-100 / 110A
     SERIAL_BT210         = 5,
 
+    SERIAL_HARDWARE      = 9,   //!< UART bus-arbitration devices that require a GPIO and ttyS* control 
     SERIAL_OTHER_FTDI    = 10,  //!< Devices based on FTDI chips
     SERIAL_OTHER_CP210x  = 11,  //!< Devices based on CP210x chips
 };

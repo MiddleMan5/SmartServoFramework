@@ -26,6 +26,7 @@
 #if defined(__linux__) || defined(__gnu_linux)
 
 #include "SerialPort.h"
+#include "beaglebone_gpio.h"
 
 /*!
  * \brief The serial ports scanner function.
@@ -49,6 +50,10 @@ class SerialPortLinux: public SerialPort
     int ttyDeviceBaudRateFlag;     //!< Speed of the serial device, from a <termios.h> enum.
     bool ttyCustomSpeed;           //!< Try to set custom speed on the serial port.
     bool ttyLowLatency;            //!< Try to set low latency flag on the serial port (works only on FTDI based adapters).
+
+    int hardwareControl;           //!< Value to store the signal or pin used for flow control on hardware UART implementations
+    //bool hardwareDirection;        //!< We can use the tx() and rx() functions as our signals; default (TX=HIGH, RX=LOW)
+    bool hardwareInverted;         //!< if TRUE, hardware output control signal is inverted ie: GPIO HIGH is: (1=RX, 0=TX)
 
     /*!
      * \brief Get current time since the Epoch.
@@ -121,6 +126,11 @@ public:
     int tx(unsigned char *packet, int packetLength);
     int rx(unsigned char *packet, int packetLength);
     void flush();
+
+    void writeHardware(bool state);
+    void setHardwarePin(int hardwarePin);
+    int getHardwarePin();
+    void setHardwareInverted(bool &hardwareInverted);
 
     /*!
      * \brief switchHighSpeed() should enable ASYNC_LOW_LATENCY flag and reduce latency_timer per tty device (need root credential)
