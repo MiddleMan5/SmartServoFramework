@@ -671,23 +671,21 @@ void SerialPortLinux::flush()
    }
  }
 
+ void SerialPortLinux::setHardwarePin(int hardwarePin)
+ {
+   hardwareControl=hardwarePin;
+ }
+
  int SerialPortLinux::getHardwarePin()
  {
-   return hardwarePin;
+   return hardwareControl;
  }
 
  void SerialPortLinux::setHardwareInverted(bool &hardwareInverted)
  {
    hardwareInverted = !hardwareInverted;
  }
-
-void SerialPortLinux::writeHardware(bool state)
-{
-
-
-
-}
-
+ 
 double SerialPortLinux::getTime()
 {
     struct timeval tv;
