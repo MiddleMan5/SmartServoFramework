@@ -23,6 +23,7 @@
 #ifndef DYNAMIXEL_H
 #define DYNAMIXEL_H
 
+#include "SerialPortQt.h"
 #include "SerialPortLinux.h"
 #include "SerialPortWindows.h"
 #include "SerialPortMacOS.h"
@@ -44,18 +45,18 @@
  * will be used by both "SimpleAPIs" and "Controllers".
  *
  * It implements both Dynamixel v1 and v2 communication protocols:
- * http://support.robotis.com/en/product/dynamixel/dxl_communication.htm
- * http://support.robotis.com/en/product/dynamixel_pro/communication.htm
+ * - http://support.robotis.com/en/product/actuator/dynamixel/dxl_communication.htm
+ * - http://support.robotis.com/en/product/actuator/dynamixel_pro/communication.htm
  */
 class Dynamixel
 {
 private:
-    SerialPort *serial;         //!< The serial port instance we are going to use.
+    SerialPort *serial = nullptr;   //!< The serial port instance we are going to use.
 
-    unsigned char txPacket[MAX_PACKET_LENGTH_dxlv1]; //!< TX "instruction" packet buffer
-    unsigned char rxPacket[MAX_PACKET_LENGTH_dxlv1]; //!< RX "status" packet buffer
-    int rxPacketSize;           //!< Size of the incoming packet
-    int rxPacketSizeReceived;   //!< Byte(s) of the incoming packet received from the serial link
+    unsigned char txPacket[MAX_PACKET_LENGTH_dxlv1] = {0};  //!< TX "instruction" packet buffer
+    unsigned char rxPacket[MAX_PACKET_LENGTH_dxlv1] = {0};  //!< RX "status" packet buffer
+    int rxPacketSize = 0;           //!< Size of the incoming packet
+    int rxPacketSizeReceived = 0;   //!< Byte(s) of the incoming packet received from the serial link
 
     /*!
      * The software lock used to lock the serial interface, to avoid concurent
@@ -64,8 +65,8 @@ private:
      * we want to keep the ability to use multiple serial interface simultaneously
      * (ex: /dev/tty0 and /dev/ttyUSB0).
      */
-    int commLock;
-    int commStatus;              //!< Last communication status
+    int commLock = 0;
+    int commStatus = COMM_RXSUCCESS;//!< Last communication status
 
     // Serial communication methods, using one of the SerialPort[Linux/Mac/Windows] implementations.
     void dxl_tx_packet();
@@ -76,12 +77,12 @@ protected:
     Dynamixel();
     virtual ~Dynamixel() = 0;
 
-    int serialDevice;            //!< Serial device in use (if known) using '::SerialDevices_e' enum. Can affect link speed and latency.
-    int servoSerie;              //!< Servo serie using '::ServoDevices_e' enum. Used internally to setup some parameters like maxID, ackPolicy and protocolVersion.
+    int serialDevice = SERIAL_UNKNOWN;      //!< Serial device in use (if known) using '::SerialDevices_e' enum. Can affect link speed and latency.
+    int servoSerie = SERVO_MX;              //!< Servo serie using '::ServoDevices_e' enum. Used internally to setup some parameters like maxID, ackPolicy and protocolVersion.
 
-    int protocolVersion;         //!< Version of the communication protocol in use.
-    int maxId;                   //!< Store in the maximum value for servo IDs.
-    int ackPolicy;               //!< Set the status/ack packet return policy using '::AckPolicy_e' (0: No return; 1: Return for READ commands; 2: Return for all commands).
+    int protocolVersion = PROTOCOL_DXLv1;   //!< Version of the communication protocol in use.
+    int maxId = 252;                        //!< Store in the maximum value for servo IDs.
+    int ackPolicy = ACK_REPLY_ALL;          //!< Set the status/ack packet return policy using '::AckPolicy_e' (0: No return; 1: Return for READ commands; 2: Return for all commands).
 
     // Handle serial link
     ////////////////////////////////////////////////////////////////////////////
@@ -136,7 +137,7 @@ protected:
     void printTxPacket();           //!< Print the TX buffer (last packet sent)
 
     // Instructions
-    bool dxl_ping(const int id, PingResponse *status = NULL, const int ack = ACK_DEFAULT);
+    bool dxl_ping(const int id, PingResponse *status = nullptr, const int ack = ACK_DEFAULT);
 
     /*!
      * \brief Reset servo control table.
@@ -198,4 +199,4 @@ public:
     void setAckPolicy(int ack);
 };
 
-#endif /* DYNAMIXEL_H */
+#endif // DYNAMIXEL_H

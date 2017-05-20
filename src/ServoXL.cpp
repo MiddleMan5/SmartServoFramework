@@ -46,26 +46,22 @@ ServoXL::~ServoXL()
 
 int ServoXL::getAlarmLed()
 {
-    // Not available on XL320
-    return 0;
+    return 0; // Not available on X series
 }
 
 void ServoXL::setAlarmLed()
 {
-    // Not available on XL320
-    return;
+    return; // Not available on X series
 }
 
 int ServoXL::getLock()
 {
-    // Not available on XL320
-    return 0;
+    return 0; // Not available on X series
 }
 
 void ServoXL::setLock()
 {
-    // Not available on XL320
-    return;
+    return; // Not available on X series
 }
 
 /* ************************************************************************** */
@@ -110,7 +106,7 @@ int ServoXL::getHardwareErrorStatus()
 
 void ServoXL::setId(int id)
 {
-    TRACE_1(DXL, "[#%i] setId(from %i to %i)\n", servoId, servoId, id);
+    TRACE_1(DXL, "[#%i] setId(from %i to %i)", servoId, servoId, id);
 
     if (id > -1 && id < 253)
     {

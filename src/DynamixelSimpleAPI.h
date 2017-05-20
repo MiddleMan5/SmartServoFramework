@@ -47,7 +47,7 @@
  * - 'SERVO_MX' should be fine for almost every use cases when using Dynamixel v1 devices.
  * - 'SERVO_DRS' should be fine for almost every use cases when using Dynamixel v1 devices.
  *
- * So for instance, if you want to use this API with XL-320 devices, you need
+ * So for instance, if you want to use this API with X series devices, you need
  * to specify it when calling the constructor.
  *
  * The "getter" functions return the wanted value or '-1' if an error occurs.
@@ -112,7 +112,7 @@ public:
      * \param id: The servo to ping.
      * \param status: A pointer to a PingResponse structure, containing model_number and firmware version infos.
      */
-    bool ping(const int id, PingResponse *status = NULL);
+    bool ping(const int id, PingResponse *status = nullptr);
 
     /*!
      * \brief Send "action" command to a servo to execute registered instructions.
@@ -124,7 +124,7 @@ public:
      * \brief Reboot a servo.
      * \param id: The servo to reboot.
      *
-     * Only "v2" devices can be rebooted (XL-320, PRO series).
+     * Only Dynamixel "v2" devices can be rebooted (X series, PRO series).
      * Be careful when rebooting a device, do not try to use it righ afer sending
      * a reboot command, it will be unavailable for a short periode of time.
      */
@@ -154,7 +154,7 @@ public:
      */
     int readFirmwareVersion(const int id);
 
-    int changeId(const int old_id, const int new_id);
+    int changeId(const int id, const int new_id);
     int changeBaudRate(const int id, const int baudnum);
 
     void getMinMaxPositions(const int id, int &min, int &max);
@@ -194,4 +194,4 @@ public:
 
 /** @}*/
 
-#endif /* DYNAMIXEL_SIMPLE_API_H */
+#endif // DYNAMIXEL_SIMPLE_API_H

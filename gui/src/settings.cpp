@@ -23,16 +23,17 @@
 #include "settings.h"
 #include "ui_settings.h"
 
-#include "rapidjson/filereadstream.h"
-#include "rapidjson/filewritestream.h"
-#include "rapidjson/document.h"
-#include "rapidjson/prettywriter.h"
+#include "thirdparty/rapidjson/filereadstream.h"
+#include "thirdparty/rapidjson/filewritestream.h"
+#include "thirdparty/rapidjson/document.h"
+#include "thirdparty/rapidjson/prettywriter.h"
 
 #if defined(__linux__) || defined(__gnu_linux)
 #include <sys/types.h>
 #include <sys/stat.h>
 #endif
 
+#include <cstdio>
 #include <iostream>
 #include <fstream>
 
@@ -51,11 +52,6 @@ Settings::Settings(QWidget *parent):
 
     // Init json parser
     parser = new Document();
-
-    ui_pause = false;
-    ctrl_autoscan = true;
-    ctrl_locks = true;
-    ctrl_freq = 10;
 
     // Configuration file path
     filepath.clear();
@@ -93,6 +89,7 @@ Settings::Settings(QWidget *parent):
 Settings::~Settings()
 {
     delete ui;
+    delete parser;
 }
 
 void Settings::loadSettings()
@@ -102,13 +99,40 @@ void Settings::loadSettings()
     ui->checkBox_autoscan->setChecked(ctrl_autoscan);
     ui->checkBox_locks->setChecked(ctrl_locks);
     ui->spinBox_freq->setValue(ctrl_freq);
-/*
+
     // serial ports
-    ui->checkBox_0->setChecked();
-    ui->lineEdit_0->setText();
-    ui->comboBox_0->setCurrentIndex()
-    ui->spinBox_0->setValue();
-*/
+    if (serial_ports.size() > 0)
+    {
+        ui->checkBox_0->setChecked(serial_ports.at(0).on);
+        ui->lineEdit_0->setText(QString::fromStdString(serial_ports.at(0).path));
+        if (serial_ports.at(0).protocol)
+        ui->comboBox_0->setCurrentIndex(serial_ports.at(0).protocol);
+        ui->spinBox_0->setValue(serial_ports.at(0).speed);
+    }
+    if (serial_ports.size() > 1)
+    {
+        ui->checkBox_1->setChecked(serial_ports.at(1).on);
+        ui->lineEdit_1->setText(QString::fromStdString(serial_ports.at(1).path));
+        if (serial_ports.at(1).protocol)
+        ui->comboBox_1->setCurrentIndex(serial_ports.at(1).protocol);
+        ui->spinBox_1->setValue(serial_ports.at(1).speed);
+    }
+    if (serial_ports.size() > 2)
+    {
+        ui->checkBox_2->setChecked(serial_ports.at(2).on);
+        ui->lineEdit_2->setText(QString::fromStdString(serial_ports.at(2).path));
+        if (serial_ports.at(2).protocol)
+        ui->comboBox_2->setCurrentIndex(serial_ports.at(2).protocol);
+        ui->spinBox_2->setValue(serial_ports.at(2).speed);
+    }
+    if (serial_ports.size() > 3)
+    {
+        ui->checkBox_3->setChecked(serial_ports.at(3).on);
+        ui->lineEdit_3->setText(QString::fromStdString(serial_ports.at(3).path));
+        if (serial_ports.at(3).protocol)
+        ui->comboBox_3->setCurrentIndex(serial_ports.at(3).protocol);
+        ui->spinBox_3->setValue(serial_ports.at(3).speed);
+    }
 }
 
 void Settings::exitSettings()
@@ -189,6 +213,110 @@ void Settings::saveSettings()
         write++;
     }
 
+    // Serial ports
+    if (parser->HasMember("serial") == false)
+    {
+        Value contacts(kObjectType);
+        (*parser).AddMember("serial", contacts, parser->GetAllocator());
+    }
+    // Read array from GUI
+    if (serial_ports.empty())
+    {
+        portConfig a, b, c ,d;
+        a.on = ui->checkBox_0->isChecked();
+        b.on = ui->checkBox_1->isChecked();
+        c.on = ui->checkBox_2->isChecked();
+        d.on = ui->checkBox_3->isChecked();
+        a.path = ui->lineEdit_0->text().toStdString();
+        b.path = ui->lineEdit_1->text().toStdString();
+        c.path = ui->lineEdit_2->text().toStdString();
+        d.path = ui->lineEdit_3->text().toStdString();
+        a.protocol = ui->comboBox_0->currentIndex();
+        b.protocol = ui->comboBox_1->currentIndex();
+        c.protocol = ui->comboBox_2->currentIndex();
+        d.protocol = ui->comboBox_3->currentIndex();
+        a.speed = ui->spinBox_0->value();
+        b.speed = ui->spinBox_1->value();
+        c.speed = ui->spinBox_2->value();
+        d.speed = ui->spinBox_3->value();
+        serial_ports.push_back(a);
+        serial_ports.push_back(b);
+        serial_ports.push_back(c);
+        serial_ports.push_back(d);
+    }
+    else
+    {
+        if (serial_ports.at(0).on != ui->checkBox_0->isChecked()) write++;
+        serial_ports.at(0).on = ui->checkBox_0->isChecked();
+        if (serial_ports.at(1).on != ui->checkBox_1->isChecked()) write++;
+        serial_ports.at(1).on = ui->checkBox_1->isChecked();
+        if (serial_ports.at(2).on != ui->checkBox_2->isChecked()) write++;
+        serial_ports.at(2).on = ui->checkBox_2->isChecked();
+        if (serial_ports.at(3).on != ui->checkBox_3->isChecked()) write++;
+        serial_ports.at(3).on = ui->checkBox_3->isChecked();
+
+        if (serial_ports.at(0).path != ui->lineEdit_0->text().toStdString()) write++;
+        serial_ports.at(0).path = ui->lineEdit_0->text().toStdString();
+        if (serial_ports.at(1).path != ui->lineEdit_1->text().toStdString()) write++;
+        serial_ports.at(1).path = ui->lineEdit_1->text().toStdString();
+        if (serial_ports.at(2).path != ui->lineEdit_2->text().toStdString()) write++;
+        serial_ports.at(2).path = ui->lineEdit_2->text().toStdString();
+        if (serial_ports.at(3).path != ui->lineEdit_3->text().toStdString()) write++;
+        serial_ports.at(3).path = ui->lineEdit_3->text().toStdString();
+
+        if (serial_ports.at(0).protocol != ui->comboBox_0->currentIndex()) write++;
+        serial_ports.at(0).protocol = ui->comboBox_0->currentIndex();
+        if (serial_ports.at(1).protocol != ui->comboBox_1->currentIndex()) write++;
+        serial_ports.at(1).protocol = ui->comboBox_1->currentIndex();
+        if (serial_ports.at(2).protocol != ui->comboBox_2->currentIndex()) write++;
+        serial_ports.at(2).protocol = ui->comboBox_2->currentIndex();
+        if (serial_ports.at(3).protocol != ui->comboBox_3->currentIndex()) write++;
+        serial_ports.at(3).protocol = ui->comboBox_3->currentIndex();
+
+        if (serial_ports.at(0).speed != ui->spinBox_0->value()) write++;
+        serial_ports.at(0).speed = ui->spinBox_0->value();
+        if (serial_ports.at(1).speed != ui->spinBox_1->value()) write++;
+        serial_ports.at(1).speed = ui->spinBox_1->value();
+        if (serial_ports.at(2).speed != ui->spinBox_2->value()) write++;
+        serial_ports.at(2).speed = ui->spinBox_2->value();
+        if (serial_ports.at(3).speed != ui->spinBox_3->value()) write++;
+        serial_ports.at(3).speed = ui->spinBox_3->value();
+    }
+
+    if ((*parser)["serial"].HasMember("ports") == false)
+    {
+        // to json
+        Value port_array(kArrayType);
+        for (unsigned i = 0; i < serial_ports.size(); i++)
+        {
+            Value port(kObjectType);
+            port.AddMember("on", serial_ports.at(i).on, parser->GetAllocator());
+            Value n(serial_ports.at(i).path.c_str(), parser->GetAllocator());
+            port.AddMember("path", n, parser->GetAllocator());
+            port.AddMember("protocol", serial_ports.at(i).protocol, parser->GetAllocator());
+            port.AddMember("speed", serial_ports.at(i).speed, parser->GetAllocator());
+            port_array.PushBack(port, parser->GetAllocator());   // allocator is needed for potential realloc().
+        }
+
+        (*parser)["serial"].AddMember("ports", port_array, parser->GetAllocator());
+        write++;
+    }
+    else if (write > 0)
+    {
+        const Value &p = (*parser)["serial"]["ports"];
+
+        if (p.IsArray())
+        {
+            for (unsigned i = 0; i < serial_ports.size() && i < p.Size(); i++)
+            {
+                (*parser)["serial"]["ports"][i]["on"].SetBool(serial_ports.at(i).on);
+                (*parser)["serial"]["ports"][i]["path"].SetString(serial_ports.at(i).path.c_str(), parser->GetAllocator());
+                (*parser)["serial"]["ports"][i]["protocol"].SetInt(serial_ports.at(i).protocol);
+                (*parser)["serial"]["ports"][i]["speed"].SetInt(serial_ports.at(i).speed);
+            }
+        }
+    }
+
     // Write modified settings to file
     if (write > 0)
     {
@@ -219,7 +347,7 @@ int Settings::getFreq()
     return ctrl_freq;
 }
 
-std::vector <struct portconfig_s> Settings::getSerialPortsConfig()
+const std::vector<portConfig> & Settings::getSerialPortsConfig()
 {
     return serial_ports;
 }
@@ -232,7 +360,7 @@ int Settings::readSettings()
     FILE *fp = std::fopen(filepath.c_str(), "r");
 
     // Parse from file, if it exists
-    if (fp == NULL)
+    if (fp == nullptr)
     {
         std::cerr << "Warning: no configuration file, using default values! A new one will be created next time you change a setting." << std::endl;
     }
@@ -257,7 +385,7 @@ int Settings::readSettings()
     // Parse from string (fallback)
     if (retcode == 0)
     {
-        std::string fallback_json = "{\"ui\":{\"pause\":false},\"ctrl\":{\"autoscan\":true,\"locks\":true,\"freq\":10},\"serial\":{\"ports\":[{\"on\":false,\"path\":\"/dev/ttyUSB0\",\"protocol\":\"auto\",\"speed\":1000000},{\"on\":false,\"path\":\"/dev/ttyUSB1\",\"protocol\":\"auto\",\"speed\":1000000},{\"on\":false,\"path\":\"/dev/ttyACM0\",\"protocol\":\"auto\",\"speed\":1000000},{\"on\":false,\"path\":\"null\",\"protocol\":\"auto\",\"speed\":1000000}]}}";
+        std::string fallback_json = "{\"ui\":{\"pause\":false},\"ctrl\":{\"autoscan\":true,\"locks\":true,\"freq\":10},\"serial\":{\"ports\":[{\"on\":false,\"path\":\"/dev/ttyUSB0\",\"protocol\":0,\"speed\":1000000},{\"on\":false,\"path\":\"/dev/ttyACM0\",\"protocol\":1,\"speed\":1000000},{\"on\":false,\"path\":\"/dev/cu.usbserial\",\"protocol\":2,\"speed\":1000000},{\"on\":false,\"path\":\"/dev/ttyS1\",\"protocol\":2,\"speed\":1000000}]}}";
 
         if (parser->Parse(fallback_json.c_str()).HasParseError() == true)
         {
@@ -312,10 +440,11 @@ int Settings::readSettings()
 
                     for (SizeType i = 0; i < p.Size(); i++)
                     {
-                        struct portconfig_s port;
+                        struct portConfig port;
                         port.on = p[i]["on"].GetBool();
                         port.path = p[i]["path"].GetString();
-                        port.protocol = p[i]["protocol"].GetString();
+                        if (p[i]["protocol"].IsInt()) // compatibility: this used to be a string
+                            port.protocol = p[i]["protocol"].GetInt();
                         port.speed = p[i]["speed"].GetInt();
                         serial_ports.push_back(port);
                     }
@@ -336,7 +465,7 @@ int Settings::writeSettings()
     {
         FILE *fp = std::fopen(filepath.c_str(), "w");
 
-        if (fp != NULL)
+        if (fp != nullptr)
         {
             char writeBuffer[8192];
             FileWriteStream os(fp, writeBuffer, sizeof(writeBuffer));
