@@ -31,6 +31,7 @@
 #include "ServoEX.h"
 #include "ServoMX.h"
 #include "ServoXL.h"
+#include "ServoX.h"
 
 #include <vector>
 
@@ -116,4 +117,4 @@ public:
 
 /** @}*/
 
-#endif /* DYNAMIXEL_CONTROLLER_H */
+#endif // DYNAMIXEL_CONTROLLER_H

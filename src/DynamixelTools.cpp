@@ -86,6 +86,25 @@ std::string dxl_get_model_name(const int model_number)
         name = "XL-320";
         break;
 
+    case 0x01020:
+        name = "XM430-W350";
+        break;
+    case 0x01030:
+        name = "XM430-W210";
+        break;
+    case 0x01040:
+        name = "XH430-V350";
+        break;
+    case 0x01050:
+        name = "XH430-V210";
+        break;
+    case 0x01000:
+        name = "XH430-W350";
+        break;
+    case 0x01010:
+        name = "XH430-W210";
+        break;
+
     case 0x0013:
         name = "AX-S1";
         break;
@@ -179,6 +198,31 @@ void dxl_get_model_infos(const int model_number, int &servo_serie, int &servo_mo
         servo_model = SERVO_XL320;
         break;
 
+    case 0x01020:
+        servo_serie = SERVO_X;
+        servo_model = SERVO_XM430_W350;
+        break;
+    case 0x01030:
+        servo_serie = SERVO_X;
+        servo_model = SERVO_XM430_W210;
+        break;
+    case 0x01040:
+        servo_serie = SERVO_X;
+        servo_model = SERVO_XH430_V350;
+        break;
+    case 0x01050:
+        servo_serie = SERVO_X;
+        servo_model = SERVO_XH430_V210;
+        break;
+    case 0x01000:
+        servo_serie = SERVO_X;
+        servo_model = SERVO_XH430_W350;
+        break;
+    case 0x01010:
+        servo_serie = SERVO_X;
+        servo_model = SERVO_XH430_W210;
+        break;
+
     case 0x0013:
         servo_serie = SENSOR_DYNAMIXEL;
         servo_model = SENSOR_AXS1;
@@ -209,7 +253,7 @@ int dxl_get_baudrate(const int baudnum, const int servo_serie)
 
     if (servo_serie == 0)
     {
-        TRACE_ERROR(TOOLS, "Unknown servo serie, using default baudrate of: '%i' bps\n", baudRate);
+        TRACE_ERROR(TOOLS, "Unknown servo serie, using default baudrate of: '%i' bps", baudRate);
     }
     else if (servo_serie >= SERVO_PRO) // Dynamixel PRO serie
     {
@@ -243,11 +287,44 @@ int dxl_get_baudrate(const int baudnum, const int servo_serie)
             baudRate = 10500000;
             break;
         default:
-            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for PRO serie, using default baudrate of: '%i' bps\n", baudnum, baudRate);
+            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for PRO serie, using default baudrate of: '%i' bps", baudnum, baudRate);
             break;
         }
     }
-    else if (servo_serie >= SERVO_XL) // Dynamixel XL-320
+    else if (servo_serie >= SERVO_X) // Dynamixel X serie
+    {
+        switch (baudnum)
+        {
+        case 0:
+            baudRate = 9600;
+            break;
+        case 1:
+            baudRate = 57600;
+            break;
+        case 2:
+            baudRate = 115200;
+            break;
+        case 3:
+            baudRate = 1000000;
+            break;
+        case 4:
+            baudRate = 2000000;
+            break;
+        case 5:
+            baudRate = 3000000;
+            break;
+        case 6:
+            baudRate = 4000000;
+            break;
+        case 7:
+            baudRate = 4500000;
+            break;
+        default:
+            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for X serie, using default baudrate of: '%i' bps", baudnum, baudRate);
+            break;
+        }
+    }
+    else if (servo_serie >= SERVO_XL) // Dynamixel XL serie
     {
         switch (baudnum)
         {
@@ -264,7 +341,7 @@ int dxl_get_baudrate(const int baudnum, const int servo_serie)
             baudRate = 1000000;
             break;
         default:
-            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for XL serie, using default baudrate of: '%i' bps\n", baudnum, baudRate);
+            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for XL serie, using default baudrate of: '%i' bps", baudnum, baudRate);
             break;
         }
     }
@@ -294,7 +371,7 @@ int dxl_get_baudrate(const int baudnum, const int servo_serie)
         }
         else
         {
-            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for MX serie, using default baudrate of: '%i' bps\n", baudnum, baudRate);
+            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for MX serie, using default baudrate of: '%i' bps", baudnum, baudRate);
         }
     }
     else if (servo_serie >= SERVO_AX) // Dynamixel AX / DX / EX / RX series
@@ -305,19 +382,19 @@ int dxl_get_baudrate(const int baudnum, const int servo_serie)
         }
         else
         {
-            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for AX serie, using default baudrate of: '%i' bps\n", baudnum, baudRate);
+            TRACE_ERROR(TOOLS, "Invalid baudnum '%i' for AX serie, using default baudrate of: '%i' bps", baudnum, baudRate);
         }
     }
     else
     {
-        TRACE_ERROR(TOOLS, "Unsupported Dynamixel servo serie, using default baudrate of: '%i' bps\n", baudRate);
+        TRACE_ERROR(TOOLS, "Unsupported Dynamixel servo serie, using default baudrate of: '%i' bps", baudRate);
     }
 
     // Force minimum baudrate to 2400 bps if needed
     if (baudRate < 2400)
     {
         baudRate = 2400;
-        TRACE_ERROR(TOOLS, "Baudrate value '%i' is too low for Dynamixel devices, using minimum baudrate of: '2400' bps\n", baudRate);
+        TRACE_ERROR(TOOLS, "Baudrate value '%i' is too low for Dynamixel devices, using minimum baudrate of: '2400' bps", baudRate);
     }
 
     return baudRate;

@@ -23,20 +23,22 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#include <QWidget>
+#include "thirdparty/rapidjson/document.h"
 
-#include "rapidjson/document.h"
+#include <string>
+#include <vector>
+#include <QWidget>
 
 namespace Ui {
 class Settings;
 }
 
-struct portconfig_s
+struct portConfig
 {
-    bool on;
-    std::string path;
-    std::string protocol;
-    int speed;
+    bool on = false;
+    std::string path = "/dev/ttyUSB0";
+    int protocol = 0;
+    int speed = 1000000;
 };
 
 class Settings : public QWidget
@@ -49,14 +51,14 @@ class Settings : public QWidget
     std::string filepath;
 
     //! Config file parser
-    rapidjson::Document *parser;
+    rapidjson::Document *parser = nullptr;
 
     // Settings
-    bool ui_pause;
-    bool ctrl_autoscan;
-    bool ctrl_locks;
-    int ctrl_freq;
-    std::vector <struct portconfig_s> serial_ports;
+    bool ui_pause = false;
+    bool ctrl_autoscan = true;
+    bool ctrl_locks = true;
+    int ctrl_freq = 10;
+    std::vector <struct portConfig> serial_ports;
 
 private slots:
     void exitSettings();
@@ -73,7 +75,7 @@ public:
     bool getLock();
     bool getPause();
     int getFreq();
-    std::vector <struct portconfig_s> getSerialPortsConfig();
+    const std::vector <struct portConfig> & getSerialPortsConfig();
 
     int readSettings();
     int writeSettings();

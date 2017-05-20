@@ -34,11 +34,6 @@ AdvanceScanner::AdvanceScanner(QMainWindow *main, QWidget *parent) :
     this->parent = main;
     ui->setupUi(this);
 
-    exit_programmed = false;
-    scan_running = false;
-    progress_global = 0.0;
-    progress_current = 0.0;
-
     ui->label_scan_errors->setVisible(false);
     ui->actionStartScan->setEnabled(false);
     ui->actionStopScan->setEnabled(false);
@@ -57,6 +52,10 @@ AdvanceScanner::AdvanceScanner(QMainWindow *main, QWidget *parent) :
     fillWidgets_ports();
     fillWidgets_speeds();
     quickProfile();
+
+#ifdef Q_OS_OSX
+    ui->toolBar->setStyleSheet("");
+#endif
 }
 
 AdvanceScanner::~AdvanceScanner()
@@ -145,9 +144,9 @@ void AdvanceScanner::fillWidgets_speeds()
 */
     // DXL v2
     row = 0;
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 8; i++)
     {
-        QTableWidgetItem *rate = new QTableWidgetItem(QString::number(dxl_get_baudrate(i, SERVO_XL)));
+        QTableWidgetItem *rate = new QTableWidgetItem(QString::number(dxl_get_baudrate(i, SERVO_X)));
         rate->setFlags(rate->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
         rate->setCheckState(Qt::Checked);
         ui->tableWidget_speed_dxl_v2->insertRow(row);
@@ -409,7 +408,7 @@ void AdvanceScanner::startScan()
 
                         // Initialize a Dynamixel (v1) instance on current serial port
                         DynamixelSimpleAPI dxl(SERVO_MX);
-                        if (dxl.connect(port, baudnum) != 0)
+                        if (dxl.connect(port, baudrate) != 0)
                         {
                             ui->treeWidget_results->setCurrentItem(wport);
 
@@ -444,11 +443,11 @@ void AdvanceScanner::startScan()
                     if (ui->tableWidget_speed_dxl_v2->item(j, 0)->checkState() == Qt::Checked)
                     {
                         int baudnum = j;
-                        int baudrate = dxl_get_baudrate(baudnum, SERVO_XL);
+                        int baudrate = dxl_get_baudrate(baudnum, SERVO_X);
 
                         // Initialize a Dynamixel (v2) instance on current serial port
-                        DynamixelSimpleAPI dxl(SERVO_XL);
-                        if (dxl.connect(port, baudnum) != 0)
+                        DynamixelSimpleAPI dxl(SERVO_X);
+                        if (dxl.connect(port, baudrate) != 0)
                         {
                             // Update progress string
                             ui->label_progress->setText("Dynamixel v2  on  " + QString::fromStdString(port) + "  @  " + QString::number(baudrate));
@@ -572,7 +571,7 @@ int AdvanceScanner::servoscan_dxl(DynamixelSimpleAPI *dxl, QTreeWidgetItem *port
     int results = 0;
     int start = ui->spinBox_minid->value();
     int stop = ui->spinBox_maxid->value();
-    QTreeWidgetItem *speed = NULL;
+    QTreeWidgetItem *speed = nullptr;
 
     // Check start/stop boundaries
     if (start < 0 || start > (254 - 1))
@@ -612,7 +611,7 @@ int AdvanceScanner::servoscan_dxl(DynamixelSimpleAPI *dxl, QTreeWidgetItem *port
             //std::cout << "[#" << id << "] DYNAMIXEL servo found!" << std::endl;
             //std::cout << "[#" << id << "] model: " << pingstats.model_number << " (" << model << ")" << std::endl;
 
-            if (speed == NULL)
+            if (speed == nullptr)
             {
                 // Add it to the interface
                 speed = new QTreeWidgetItem();
@@ -648,7 +647,7 @@ int AdvanceScanner::servoscan_hkx(HerkuleXSimpleAPI *hkx, QTreeWidgetItem *port,
     int results = 0;
     int start = ui->spinBox_minid->value();
     int stop = ui->spinBox_maxid->value();
-    QTreeWidgetItem *speed = NULL;
+    QTreeWidgetItem *speed = nullptr;
 
     // Check start/stop boundaries
     if (start < 0 || start > (254 - 1))
@@ -687,7 +686,7 @@ int AdvanceScanner::servoscan_hkx(HerkuleXSimpleAPI *hkx, QTreeWidgetItem *port,
             //std::cout << "[#" << id << "] HerkuleX servo found!" << std::endl;
             //std::cout << "[#" << id << "] model: " << pingstats.model_number << " (" << model << ")" << std::endl;
 
-            if (speed == NULL)
+            if (speed == nullptr)
             {
                 // Add it to the interface
                 speed = new QTreeWidgetItem();

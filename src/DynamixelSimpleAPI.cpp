@@ -39,7 +39,7 @@ DynamixelSimpleAPI::DynamixelSimpleAPI(int servoSerie)
             ackPolicy = 1;
             maxId = 253;
 
-            protocolVersion = 1;
+            protocolVersion = PROTOCOL_HKX;
             servoSerie = SERVO_DRS;
 
             if (servoSerie == SERVO_DRS_0402 || servoSerie == SERVO_DRS_0602)
@@ -55,7 +55,7 @@ DynamixelSimpleAPI::DynamixelSimpleAPI(int servoSerie)
                 ct = DRS0101_control_table;
             }
 
-            TRACE_INFO(DAPI, "- Using HerkuleX communication protocol\n");
+            TRACE_INFO(DAPI, "- Using HerkuleX communication protocol");
         }
         else //if (servos >= SERVO_DYNAMIXEL)
         {
@@ -64,20 +64,26 @@ DynamixelSimpleAPI::DynamixelSimpleAPI(int servoSerie)
 
             if (servoSerie >= SERVO_PRO)
             {
-                protocolVersion = 2;
+                protocolVersion = PROTOCOL_DXLv2;
                 servoSerie = SERVO_PRO;
                 ct = PRO_control_table;
             }
+            else if (servoSerie >= SERVO_X)
+            {
+                protocolVersion = PROTOCOL_DXLv2;
+                servoSerie = SERVO_X;
+                ct = XMXH_control_table;
+            }
             else if (servoSerie >= SERVO_XL)
             {
-                protocolVersion = 2;
+                protocolVersion = PROTOCOL_DXLv2;
                 servoSerie = SERVO_XL;
                 ct = XL320_control_table;
             }
             else // SERVO AX to MX
             {
-                // Default is Dynamixel MX, the more 'capable' of the Dynamixel v1 series
-                protocolVersion = 1;
+                // We set the servo serie to 'MX' which is the more capable of the Dynamixel v1 serie
+                protocolVersion = PROTOCOL_DXLv1;
                 servoSerie = SERVO_MX;
                 ct = MX_control_table;
 
@@ -92,19 +98,19 @@ DynamixelSimpleAPI::DynamixelSimpleAPI(int servoSerie)
                 }
             }
 
-            if (protocolVersion == 2)
+            if (protocolVersion == PROTOCOL_DXLv2)
             {
-                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 2\n");
+                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 2");
             }
             else
             {
-                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 1\n");
+                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 1");
             }
         }
     }
     else
     {
-        TRACE_WARNING(DAPI, "Warning: Unknown servo serie!\n");
+        TRACE_WARNING(DAPI, "Warning: Unknown servo serie!");
     }
 }
 
@@ -137,11 +143,11 @@ bool DynamixelSimpleAPI::checkId(const int id, const bool broadcast)
     {
         if (id == BROADCAST_ID && broadcast == false)
         {
-            TRACE_ERROR(DAPI, "Error: Broadcast ID is disabled for the current instruction.\n");
+            TRACE_ERROR(DAPI, "Error: Broadcast ID is disabled for the current instruction.");
         }
         else
         {
-            TRACE_ERROR(DAPI, "Error: ID '%i' is out of [0;%i] boundaries.\n", id, maxId);
+            TRACE_ERROR(DAPI, "Error: ID '%i' is out of [0;%i] boundaries.", id, maxId);
         }
     }
 
@@ -157,7 +163,7 @@ std::vector <int> DynamixelSimpleAPI::servoScan(int start, int stop)
     if (stop < 1 || stop > maxId || stop < start)
         stop = maxId;
 
-    TRACE_INFO(DAPI, "> Scanning for Dynamixel devices on '%s'... Range is [%i,%i]\n",
+    TRACE_INFO(DAPI, "> Scanning for Dynamixel devices on '%s'... Range is [%i,%i]",
                serialGetCurrentDevice().c_str(), start, stop);
 
     // A vector of Dynamixel IDs found during the scan
@@ -174,17 +180,17 @@ std::vector <int> DynamixelSimpleAPI::servoScan(int start, int stop)
 
             ids.push_back(id);
 
-            TRACE_INFO(DAPI, "[#%i] Dynamixel servo found!\n", id);
-            TRACE_INFO(DAPI, "[#%i] model: '%i' (%s)\n", id, pingstats.model_number,
+            TRACE_INFO(DAPI, "[#%i] Dynamixel servo found!", id);
+            TRACE_INFO(DAPI, "[#%i] model: '%i' (%s)", id, pingstats.model_number,
                        dxl_get_model_name(pingstats.model_number).c_str());
 
             // Other informations, not printed by default:
-            TRACE_1(DAPI, "[#%i] firmware: '%i' \n", id, pingstats.firmware_version);
-            TRACE_1(DAPI, "[#%i] position: '%i' \n", id, readCurrentPosition(id));
-            TRACE_1(DAPI, "[#%i] speed: '%i' \n", id, readCurrentSpeed(id));
-            TRACE_1(DAPI, "[#%i] torque: '%i' \n", id, getTorqueEnabled(id));
-            TRACE_1(DAPI, "[#%i] load: '%i' \n", id, readCurrentLoad(id));
-            TRACE_1(DAPI, "[#%i] baudrate: '%i' \n", id, getSetting(id, REG_BAUD_RATE));
+            TRACE_1(DAPI, "[#%i] firmware: '%i' ", id, pingstats.firmware_version);
+            TRACE_1(DAPI, "[#%i] position: '%i' ", id, readCurrentPosition(id));
+            TRACE_1(DAPI, "[#%i] speed: '%i' ", id, readCurrentSpeed(id));
+            TRACE_1(DAPI, "[#%i] torque: '%i' ", id, getTorqueEnabled(id));
+            TRACE_1(DAPI, "[#%i] load: '%i' ", id, readCurrentLoad(id));
+            TRACE_1(DAPI, "[#%i] baudrate: '%i' ", id, getSetting(id, REG_BAUD_RATE));
 
             setLed(id, 0);
         }
@@ -263,12 +269,12 @@ int DynamixelSimpleAPI::readFirmwareVersion(const int id)
     return value;
 }
 
-int DynamixelSimpleAPI::changeId(const int old_id, const int new_id)
+int DynamixelSimpleAPI::changeId(const int id, const int new_id)
 {
     int status = 0;
 
     // Check 'old' ID
-    if (checkId(old_id, false) == true)
+    if (checkId(id, false) == true)
     {
         // Check 'new' ID // Valid IDs are in range [0:maxId]
         if ((new_id >= 0) && (new_id <= maxId))
@@ -278,13 +284,13 @@ int DynamixelSimpleAPI::changeId(const int old_id, const int new_id)
 
             if (dxl_get_com_status() == COMM_RXSUCCESS)
             {
-                TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: already in use\n", new_id);
+                TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: already in use", new_id);
             }
             else
             {
                 int addr = getRegisterAddr(ct, REG_ID);
 
-                dxl_write_byte(old_id, addr, new_id);
+                dxl_write_byte(id, addr, new_id);
                 if (dxl_print_error() == 0)
                 {
                     status = 1;
@@ -293,7 +299,7 @@ int DynamixelSimpleAPI::changeId(const int old_id, const int new_id)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: out of range\n", new_id);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: out of range", new_id);
         }
     }
 
@@ -319,7 +325,7 @@ int DynamixelSimpleAPI::changeBaudRate(const int id, const int baudnum)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set new baudnum '%i' for this servo: out of range\n", id, baudnum);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set new baudnum '%i' for this servo: out of range", id, baudnum);
         }
     }
 
@@ -372,7 +378,7 @@ int DynamixelSimpleAPI::setMinMaxPositions(const int id, const int min, const in
         // Valid positions are in range [0:1023] for most servo series, and [0:4095] for high-end servo series
         if ((min < 0) || (min > 4095) || (max < 0) || (max > 4095))
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set new min/max positions '%i/%i' for this servo: out of range\n", id, min, max);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set new min/max positions '%i/%i' for this servo: out of range", id, min, max);
         }
         else
         {
@@ -596,7 +602,7 @@ int DynamixelSimpleAPI::setGoalPosition(const int id, const int position)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range\n", id, position);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range", id, position);
         }
     }
 
@@ -625,7 +631,7 @@ int DynamixelSimpleAPI::setGoalPosition(const int id, const int position, const 
             }
             else
             {
-                TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range\n", id, position);
+                TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range", id, position);
             }
         }
     }
@@ -702,7 +708,7 @@ int DynamixelSimpleAPI::setGoalSpeed(const int id, const int speed)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set goal speed '%i' for this servo: out of range\n", id, speed);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set goal speed '%i' for this servo: out of range", id, speed);
         }
     }
 
@@ -861,7 +867,7 @@ int DynamixelSimpleAPI::getSetting(const int id, const int reg_name, int reg_typ
         // Device detection
         const int (*cctt)[8] = getRegisterTable(device);
 
-        if (cctt == NULL)
+        if (cctt == nullptr)
         {
             // Using default control table from this SimpleAPI isntance
             cctt = ct;
@@ -891,17 +897,17 @@ int DynamixelSimpleAPI::getSetting(const int id, const int reg_name, int reg_typ
             }
             else
             {
-                TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [REGISTER NAME ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+                TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [REGISTER NAME ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
             }
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [CONTROL TABLE ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+            TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [CONTROL TABLE ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
         }
     }
     else
     {
-        TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [DEVICE ID ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+        TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [DEVICE ID ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
     }
 
     return value;
@@ -916,7 +922,7 @@ int DynamixelSimpleAPI::setSetting(const int id, const int reg_name, const int r
         // Device detection
         const int (*cctt)[8] = getRegisterTable(device);
 
-        if (cctt == NULL)
+        if (cctt == nullptr)
         {
             // Using default control table from this SimpleAPI isntance
             cctt = ct;
@@ -952,28 +958,28 @@ int DynamixelSimpleAPI::setSetting(const int id, const int reg_name, const int r
                     }
                     else
                     {
-                        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [VALUE ERROR] (min: %i / max: %i)\n",
+                        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [VALUE ERROR] (min: %i / max: %i)",
                                     id, reg_name, getRegisterNameTxt(reg_name).c_str(), infos.reg_value_min, infos.reg_value_max);
                     }
                 }
                 else
                 {
-                    TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER ACCESS ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+                    TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER ACCESS ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
                 }
             }
             else
             {
-                TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER NAME ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+                TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER NAME ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
             }
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [CONTROL TABLE ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+            TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [CONTROL TABLE ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
         }
     }
     else
     {
-        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [DEVICE ID ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [DEVICE ID ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
     }
 
     return status;

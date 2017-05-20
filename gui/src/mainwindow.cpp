@@ -23,7 +23,11 @@
 // UI
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "widgetSerialScan.h"
 #include "qabout.h"
+
+#include "advancescanner.h"
+#include "settings.h"
 
 // SmartServoFramework
 #include "../../src/DynamixelController.h"
@@ -32,19 +36,22 @@
 #include "../../src/HerkuleXTools.h"
 
 // Qt
-#include <QFile>
-#include <QTimer>
 #include <QApplication>
 #include <QLabel>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QTextStream>
 #include <QTextBrowser>
 #include <QMessageBox>
 #include <QSignalMapper>
 #include <QCloseEvent>
+#include <QFile>
+#include <QTimer>
 
 // C++ standard libraries
 #include <iostream>
+
+/* ************************************************************************** */
 
 MainWindow::MainWindow(QWidget *parent):
     QMainWindow(parent),
@@ -52,20 +59,17 @@ MainWindow::MainWindow(QWidget *parent):
 {
     // UI
     ui->setupUi(this);
-    ui->tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
     ui->deviceTreeWidget->setSelectionMode(QAbstractItemView::SingleSelection);
 
     ui->serialPortErrors_label->hide();
-    ui->frame_err_dxl1->hide();
-    ui->frame_err_dxl2->hide();
-    ui->frame_err_hkx->hide();
-    ui->frameStatus->hide();
+    ui->widgetStatus->hide();
 
     // Force custom window size
     setGeometry(0, 0, 1200, 640);
 
-    // Save "loading" tab widget, it's the 5th (and last) tab
-    loadingTabWidget = ui->tabWidget->widget(ui->tabWidget->count() - 1);
+    // Save "serial" and "loading" tab widgets
+    serialTabWidget = ui->tabWidget->widget(ui->tabWidget->count() - 2); // 5th tab
+    loadingTabWidget = ui->tabWidget->widget(ui->tabWidget->count() - 1); // 6th (and last) tab
 
     // QTreeWidget contextual actions
     ui->deviceTreeWidget->setContextMenuPolicy(Qt::ActionsContextMenu);
@@ -83,31 +87,28 @@ MainWindow::MainWindow(QWidget *parent):
     QObject::connect(ui->actionAboutQt, SIGNAL(triggered()), this, SLOT(aboutQt()));
     QObject::connect(ui->actionExit, SIGNAL(triggered()), this, SLOT(close()));
 
-    //QObject::connect(ui->pushButton_updateStatus, SIGNAL(clicked()), this, SLOT(clearErrors()));
-    QObject::connect(ui->pushButton_clearStatus, SIGNAL(clicked()), this, SLOT(clearErrors()));
+    QObject::connect(ui->widgetStatus, SIGNAL(updateButton()), this, SLOT(clearErrors()));
+    QObject::connect(ui->widgetStatus, SIGNAL(clearButton()), this, SLOT(clearErrors()));
 
     QObject::connect(ui->pushScanSerial, SIGNAL(clicked()), this, SLOT(scanSerialPorts()));
     QObject::connect(ui->pushScanServo, SIGNAL(clicked()), this, SLOT(scanServos()));
-    QObject::connect(ui->deviceTreeWidget, SIGNAL(itemSelectionChanged()), this, SLOT(servoSelection()));
+    QObject::connect(ui->deviceTreeWidget, SIGNAL(itemSelectionChanged()), this, SLOT(treewidgetSelection()));
 
-    // Resize content when changing tab or selecting servo
+    // Resize content when changing tab
     QObject::connect(ui->tabWidget, SIGNAL(currentChanged(int)), this, SLOT(resizeTabWidgetContent()));
 
     // Initialize device "self refresh" loop
     selfRefreshTimer = new QTimer(this);
     connect(selfRefreshTimer, SIGNAL(timeout()), this, SLOT(servoUpdate()));
 
-    // Advance Scanner window
-    asw = NULL;
-
     // Setting window
     stw = new Settings();
     stw->readSettings();
     stw->loadSettings();
 
-    tableServoSerie = 0;
-    tableServoModel = 0;
-    tableAutoSelection = false;
+#ifdef Q_OS_OSX
+    ui->toolBar->setStyleSheet("");
+#endif
 }
 
 MainWindow::~MainWindow()
@@ -116,14 +117,14 @@ MainWindow::~MainWindow()
     {
         asw->close();
         delete asw;
-        asw = NULL;
+        asw = nullptr;
     }
 
     if (stw)
     {
         stw->close();
         delete stw;
-        stw = NULL;
+        stw = nullptr;
     }
 
     delete ui;
@@ -132,67 +133,118 @@ MainWindow::~MainWindow()
     // Clean up controllers
     for (auto p: serialPorts)
     {
-        if (p != NULL)
+        if (p != nullptr)
         {
-            if (p->deviceController != NULL)
+            if (p->deviceController != nullptr)
             {
                 delete p->deviceController;
-                p->deviceController = NULL;
+                p->deviceController = nullptr;
             }
 
             delete p;
-            p = NULL;
+            p = nullptr;
         }
     }
 }
 
-void MainWindow::loadingScreen(bool enabled)
+/* ************************************************************************** */
+
+void MainWindow::helpScreen(bool loading)
 {
-    QTabBar *tabBar = ui->tabWidget->findChild<QTabBar *>();
-    tabBar->setVisible(!enabled);
-    ui->tabWidget->setDocumentMode(enabled);
+    ui->tabWidget->findChild<QTabBar *>()->setVisible(false);
+    ui->tabWidget->setDocumentMode(true);
 
-    if (enabled == true)
+    bool tabalreadythere = false;
+    for (int i = 0; i < ui->tabWidget->count(); i++)
     {
-        ui->frame_loading->show();
+        if (ui->tabWidget->tabText(i) == "serial")
+            ui->tabWidget->removeTab(i);
+    }
+    for (int i = 0; i < ui->tabWidget->count(); i++)
+    {
+        if (ui->tabWidget->tabText(i) == "loading")
+            tabalreadythere = true;
+    }
+    if (tabalreadythere == false)
+        ui->tabWidget->addTab(loadingTabWidget, "loading");
 
-        if (ui->tabWidget->count() != 5)
-        {
-            ui->tabWidget->addTab(loadingTabWidget, "loading");
-        }
-        ui->tabWidget->setCurrentIndex(ui->tabWidget->count() - 1);
+    // Set tab index
+    ui->tabWidget->setCurrentIndex(ui->tabWidget->count() - 1);
 
-        // Show "help" panel while loading GUI
-        int x = ui->label_loading_img->size().width();
-        int y = ui->label_loading_img->size().height();
-        ui->label_loading_img->setMaximumWidth(x);
-        ui->label_loading_img->setMaximumHeight(y);
+    // Loading bar
+     ui->frame_loading->setVisible(loading);
 
-        if ((rand() % 1024) >= 512)
-        {
-            QPixmap load(":/help/help/Dynamixel_help.png");
+    // Show "help" panel while loading GUI
+    int x = ui->label_loading_img->size().width();
+    int y = ui->label_loading_img->size().height();
+    ui->label_loading_img->setMaximumWidth(x);
+    ui->label_loading_img->setMaximumHeight(y);
+
+    if ((rand() % 1024) >= 512)
+    {
+        QPixmap load(":/help/help/Dynamixel_help.png");
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-            load.setDevicePixelRatio(qApp->devicePixelRatio());
+        load.setDevicePixelRatio(qApp->devicePixelRatio());
 #endif
-            ui->label_loading_img->setPixmap(load);
-        }
-        else
-        {
-            QPixmap load(":/help/help/HerkuleX_help.png");
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-            load.setDevicePixelRatio(qApp->devicePixelRatio());
-#endif
-            ui->label_loading_img->setPixmap(load);
-        }
+        ui->label_loading_img->setPixmap(load);
     }
     else
     {
-        ui->frame_loading->hide();
-
-        ui->tabWidget->removeTab(4);
-        ui->tabWidget->setCurrentIndex(0);
+        QPixmap load(":/help/help/HerkuleX_help.png");
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+        load.setDevicePixelRatio(qApp->devicePixelRatio());
+#endif
+        ui->label_loading_img->setPixmap(load);
     }
 }
+
+void MainWindow::serialScreen()
+{
+    ui->tabWidget->findChild<QTabBar *>()->hide();
+    ui->tabWidget->setDocumentMode(true);
+
+    bool tabalreadythere = false;
+    for (int i = 0; i < ui->tabWidget->count(); i++)
+    {
+        if (ui->tabWidget->tabText(i) == "loading")
+            ui->tabWidget->removeTab(i);
+    }
+    for (int i = 0; i < ui->tabWidget->count(); i++)
+    {
+        if (ui->tabWidget->tabText(i) == "serial")
+            tabalreadythere = true;
+    }
+    if (tabalreadythere == false)
+    {
+        ui->tabWidget->addTab(serialTabWidget, "serial");
+    }
+
+    // Set tab index
+    ui->tabWidget->setCurrentIndex(ui->tabWidget->count() - 1);
+}
+
+void MainWindow::servoScreen()
+{
+    // Set the QTabBar visible
+    ui->tabWidget->findChild<QTabBar *>()->setVisible(true);
+    ui->tabWidget->setDocumentMode(false);
+
+    for (int i = 0; i < ui->tabWidget->count(); i++)
+    {
+        if (ui->tabWidget->tabText(i) == "serial")
+            ui->tabWidget->removeTab(i);
+    }
+    for (int i = 0; i < ui->tabWidget->count(); i++)
+    {
+        if (ui->tabWidget->tabText(i) == "loading")
+            ui->tabWidget->removeTab(i);
+    }
+
+    // Set tab index
+    ui->tabWidget->setCurrentIndex(0);
+}
+
+/* ************************************************************************** */
 
 void MainWindow::autoScan()
 {
@@ -209,9 +261,8 @@ void MainWindow::autoScan()
 void MainWindow::scanSerialPorts(bool autoscan)
 {
     // Disable scan buttons, indicate we are starting to scan
-    ui->pushScanSerial->setDisabled(true);
-    ui->pushScanServo->setDisabled(true);
-    loadingScreen(true);
+    ui->frameDevices->setDisabled(true);
+    helpScreen(true);
 
     // Clean the deviceTreeWidget content
     while (QWidget *item = ui->deviceTreeWidget->childAt(0,0))
@@ -234,27 +285,31 @@ void MainWindow::scanSerialPorts(bool autoscan)
     // Clean existing serial ports list and associated controllers
     for (auto p: serialPorts)
     {
-        if (p != NULL)
+        if (p != nullptr)
         {
-            if (p->deviceController != NULL)
+            if (p->deviceController != nullptr)
             {
                 delete p->deviceController;
-                p->deviceController = NULL;
+                p->deviceController = nullptr;
             }
 
             delete p;
-            p = NULL;
+            p = nullptr;
         }
     }
     serialPorts.clear();
 
     // Scan for available/new serial ports
     std::vector <std::string> availablePorts;
+
+#if defined(FEATURE_QTSERIAL)
+    serialPortsScannerQt(availablePorts);
+#else
     serialPortsScanner(availablePorts);
+#endif
 
     if (availablePorts.size() == 0)
     {
-        ui->groupPorts->hide();
         ui->serialPortErrors_label->show();
 
         QTreeWidgetItem *port = new QTreeWidgetItem();
@@ -263,11 +318,7 @@ void MainWindow::scanSerialPorts(bool autoscan)
     }
     else
     {
-        ui->groupPorts->show();
         ui->serialPortErrors_label->hide();
-
-        QSignalMapper *signalMapper = new QSignalMapper(this);
-        QObject::connect(signalMapper, SIGNAL(mapped(QString)), this, SLOT(refreshSerialPort(QString)));
 
         // Create "helper" structure to keep track of serial port instances
         // Create an entry inside the "scan group box" for each serial port
@@ -276,33 +327,14 @@ void MainWindow::scanSerialPorts(bool autoscan)
             SerialPortHelper *helper = new SerialPortHelper();
             serialPorts.push_back(helper);
 
-            helper->deviceName = new QCheckBox(QString::fromStdString(p));
-            helper->deviceName->setChecked(true);
-            helper->deviceSettings = new QComboBox();
-            helper->deviceSettings->addItem("auto");
-            helper->deviceSettings->addItem("DXL v1 @ 1 Mb/s");
-            helper->deviceSettings->addItem("DXL v1 @ 115.2 Kb/s");
-            helper->deviceSettings->addItem("DXL v1 @ 57.6 Kb/s");
-            helper->deviceSettings->addItem("DXL v2 @ 1 Mb/s");
-            helper->deviceSettings->addItem("DXL v2 @ 115.2 Kb/s");
-            helper->deviceSettings->addItem("DXL v2 @ 57.6 Kb/s");
-            helper->deviceSettings->addItem("HKX @ 115.2 Kb/s");
-            helper->deviceSettings->addItem("HKX @ 57.6 Kb/s");
-            helper->deviceSettings->addItem("HKX @ 1 Mb/s");
-            helper->deviceSettings->setMaximumSize(80, 28);
-            helper->deviceSettings->setFont(QFont("Cantarell", 10));
-            helper->deviceScan = new QPushButton();
-            helper->deviceScan->setIcon(QIcon(":/icons/icons/emblem-ubuntuone-updating.svg"));
-            helper->deviceScan->setIconSize(QSize(24, 24));
-            helper->deviceScan->setMaximumSize(24, 24);
-            helper->deviceScan->setFlat(true);
-            ui->groupPorts->layout()->addWidget(helper->deviceName);
-            ui->groupPorts->layout()->addWidget(helper->deviceSettings);
-            ui->groupPorts->layout()->addWidget(helper->deviceScan);
-            ui->groupPorts->update();
+            helper->deviceName_str = p;
+            helper->deviceName_qstr = QString::fromStdString(p);
+            helper->deviceWidget = new widgetSerialScan(helper->deviceName_qstr);
 
-            signalMapper->setMapping(helper->deviceScan, QString(helper->deviceName->text()));
-            QObject::connect(helper->deviceScan, SIGNAL(clicked()), signalMapper, SLOT(map()));
+            QObject::connect(helper->deviceWidget, SIGNAL(scanButton(QString)), this, SLOT(refreshSerialPort(QString)));
+
+            ui->groupPorts->layout()->addWidget(helper->deviceWidget);
+            ui->groupPorts->update();
         }
 
         // Update the GUI before each servo scan
@@ -310,17 +342,16 @@ void MainWindow::scanSerialPorts(bool autoscan)
 
         // Launch servo scanning?
         if (autoscan == true)
-        {
             scanServos();
-        }
+        else
+            helpScreen(false);
     }
 
     // Indicate that we are no longer scanning
-    ui->pushScanSerial->setEnabled(true);
-    ui->pushScanServo->setEnabled(true);
+    ui->frameDevices->setEnabled(true);
 
-    // Maybe this scan did not yield any results, to avoid showing a blank interface,
-    // we do not turn off loading screen, only the loading animation
+    // Maybe this scan did not yield any results, to avoid showing a blank
+    // interface, we do not turn off loading screen, only the loading animation
     ui->frame_loading->hide();
 
     // Update UI
@@ -329,71 +360,58 @@ void MainWindow::scanSerialPorts(bool autoscan)
 
 void MainWindow::scanServos()
 {
-    ui->pushScanSerial->setDisabled(true);
-    ui->pushScanServo->setDisabled(true);
-    tableAutoSelection = false;
+    ui->frameDevices->setDisabled(true);
     scan_running = true;
+    treewidgetAutoSelection = false;
 
     for (SerialPortHelper *h: serialPorts)
     {
         if (scan_running == true)
         {
             // Process the device only if its GUI element is 'checked'
-            if (h->deviceName->isChecked() == true)
+            if (h->deviceWidget->isSelected() == true)
             {
                 // Launch a scan
-                scanServos(h->deviceName->text());
+                scanServos(h->deviceName_qstr);
             }
         }
     }
 
     scan_running = false;
-
-    ui->pushScanSerial->setEnabled(true);
-    ui->pushScanServo->setEnabled(true);
+    ui->frameDevices->setEnabled(true);
 }
 
 void MainWindow::refreshSerialPort(QString port_qstring)
 {
-    ui->pushScanSerial->setDisabled(true);
-    ui->pushScanServo->setDisabled(true);
-    tableAutoSelection = false;
+    ui->frameDevices->setDisabled(true);
     scan_running = true;
+    treewidgetAutoSelection = false;
 
     // Launch a scan
     scanServos(port_qstring);
 
     scan_running = false;
-
-    ui->pushScanSerial->setEnabled(true);
-    ui->pushScanServo->setEnabled(true);
+    ui->frameDevices->setEnabled(true);
 }
 
 void MainWindow::scanServos(QString port_qstring)
 {
     // Disable scan buttons
-    ui->pushScanSerial->setDisabled(true);
-    ui->pushScanServo->setDisabled(true);
+    ui->frameDevices->setDisabled(true);
 
     bool ctrl_locks = stw->getLock();
     int ctrl_freq = stw->getFreq();
 
     // First locate the port to scan
-    for (struct SerialPortHelper *h: serialPorts)
+    for (auto h: serialPorts)
     {
-        if (h->deviceName->text() == port_qstring)
+        if (h->deviceName_qstr == port_qstring)
         {
-            std::string port_stdstring = port_qstring.toStdString();
-            std::cout << ">> scanServos(" << port_stdstring << ")" << std::endl;
-
-            // Disable the refresh button on this port
-            h->deviceScan->setDisabled(true);
+            std::cout << ">> scanServos(" << h->deviceName_str << ")" << std::endl;
 
             // Indicate we are starting to scan
-            // FIXME check if we are on the loading tab
             {
-                ui->frame_loading->show();
-
+                helpScreen(true);
                 ui->tabWidget->update();
                 ui->tabWidget->repaint();
                 qApp->processEvents();
@@ -406,10 +424,10 @@ void MainWindow::scanServos(QString port_qstring)
             }
 
             // Clean devices attached to the corresponding deviceTreeWidget port (if needed)
-            QTreeWidgetItem *port = NULL;
+            QTreeWidgetItem *port = nullptr;
             for (int i = 0; i < ui->deviceTreeWidget->topLevelItemCount(); i++)
             {
-                if (ui->deviceTreeWidget->topLevelItem(i)->text(0) == h->deviceName->text())
+                if (ui->deviceTreeWidget->topLevelItem(i)->text(0) == h->deviceName_qstr)
                 {
                     port = ui->deviceTreeWidget->topLevelItem(i);
                     while (port->childCount() > 0)
@@ -422,7 +440,7 @@ void MainWindow::scanServos(QString port_qstring)
             }
 
             // Add port in deviceTreeWidget (if needed)
-            if (port == NULL)
+            if (port == nullptr)
             {
                 port = new QTreeWidgetItem();
                 ui->deviceTreeWidget->addTopLevelItem(port);
@@ -447,10 +465,10 @@ void MainWindow::scanServos(QString port_qstring)
 
             for (int i = 0; i < scan_rounds; i++)
             {
-                if (h->deviceSettings->currentIndex() == 0)
+                if (h->deviceWidget->getCurrentIndex() == 0)
                 {
                     // Rewrite 'scan_setting' if scan preset is set to 'auto'
-                    int scanrounds_item[4] = {1, 3, 4, 7};
+                    int scanrounds_item[4] = {2, 4, 5, 8};
                     scan_rounds = 4;
                     scan_results = 0;
                     scan_setting = scanrounds_item[i];
@@ -459,7 +477,7 @@ void MainWindow::scanServos(QString port_qstring)
                 {
                     scan_rounds  = 1;
                     scan_results = 0;
-                    scan_setting = h->deviceSettings->currentIndex();
+                    scan_setting = h->deviceWidget->getCurrentIndex();
 
                     // We need to check is the protocol or speed has changed on the selected port
                     deviceControllerProtocolSAVED = h->deviceControllerProtocol;
@@ -467,121 +485,66 @@ void MainWindow::scanServos(QString port_qstring)
                 }
 
                 // Load controller settings
-                switch (scan_setting)
-                {
-                // DXL v1
-                case 1:
-                    h->deviceControllerProtocol = 1;
-                    h->deviceControllerSpeed = 1000000;
-                    h->deviceControllerDevices = SERVO_MX;
-                    break;
-                case 2:
-                    h->deviceControllerProtocol = 1;
-                    h->deviceControllerSpeed = 115200;
-                    h->deviceControllerDevices = SERVO_MX;
-                    break;
-                case 3:
-                    h->deviceControllerProtocol = 1;
-                    h->deviceControllerSpeed = 57600;
-                    h->deviceControllerDevices = SERVO_MX;
-                    break;
-
-                // DXL v2
-                case 4:
-                    h->deviceControllerProtocol = 2;
-                    h->deviceControllerSpeed = 1000000;
-                    h->deviceControllerDevices = SERVO_XL;
-                    break;
-                case 5:
-                    h->deviceControllerProtocol = 2;
-                    h->deviceControllerSpeed = 115200;
-                    h->deviceControllerDevices = SERVO_XL;
-                    break;
-                case 6:
-                    h->deviceControllerProtocol = 2;
-                    h->deviceControllerSpeed = 57600;
-                    h->deviceControllerDevices = SERVO_XL;
-                    break;
-
-                // HKX
-                case 7:
-                    h->deviceControllerProtocol = 3;
-                    h->deviceControllerSpeed = 115200;
-                    h->deviceControllerDevices = SERVO_DRS;
-                    break;
-                case 8:
-                    h->deviceControllerProtocol = 3;
-                    h->deviceControllerSpeed = 57600;
-                    h->deviceControllerDevices = SERVO_DRS;
-                    break;
-                case 9:
-                    h->deviceControllerProtocol = 3;
-                    h->deviceControllerSpeed = 1000000;
-                    h->deviceControllerDevices = SERVO_DRS;
-                    break;
-                }
+                h->deviceControllerProtocol = h->deviceWidget->getCurrentProtocol(scan_setting);
+                h->deviceControllerSpeed = h->deviceWidget->getCurrentSpeed(scan_setting);
+                h->deviceControllerDeviceClass = h->deviceWidget->getCurrentDeviceClass(scan_setting);
 
                 // Do we need a new controller for this serial port?
                 // - no controller instanciated
                 // - controller with new protocol or speed
-                if (h->deviceController == NULL ||
+                if (h->deviceController == nullptr ||
                     deviceControllerProtocolSAVED != h->deviceControllerProtocol ||
                     deviceControllerSpeedSAVED != h->deviceControllerSpeed)
                 {
                     // Delete old controller (if needed)
-                    if (h->deviceController != NULL)
+                    if (h->deviceController != nullptr)
                     {
                         h->deviceController->disconnect();
                         delete h->deviceController;
-                        h->deviceController = NULL;
+                        h->deviceController = nullptr;
                     }
 
-                    // Create a new one
-                    if (h->deviceControllerProtocol == 1)
+                    // Create a new controller
+                    if (h->deviceControllerProtocol == PROTOCOL_DXLv1 ||
+                        h->deviceControllerProtocol == PROTOCOL_DXLv2)
                     {
-                        h->deviceController = new DynamixelController(ctrl_freq, h->deviceControllerDevices);
+                        h->deviceController = new DynamixelController(ctrl_freq, h->deviceControllerDeviceClass);
                     }
-                    else if (h->deviceControllerProtocol == 2)
+                    else if (h->deviceControllerProtocol == PROTOCOL_HKX)
                     {
-                        h->deviceController = new DynamixelController(ctrl_freq, h->deviceControllerDevices);
-                    }
-                    else if (h->deviceControllerProtocol == 3)
-                    {
-                        h->deviceController = new HerkuleXController(ctrl_freq, h->deviceControllerDevices);
+                        h->deviceController = new HerkuleXController(ctrl_freq, h->deviceControllerDeviceClass);
                     }
 
                     // Connect the controller to its serial port
-                    if (h->deviceController != NULL)
+                    if (h->deviceController != nullptr)
                     {
-                        scan_results = h->deviceController->connect(port_stdstring, h->deviceControllerSpeed);
+                        scan_results = h->deviceController->connect(h->deviceName_str, h->deviceControllerSpeed);
 
                         if (scan_results != 1)
                         {
                             h->deviceController->disconnect();
                             delete h->deviceController;
-                            h->deviceController = NULL;
+                            h->deviceController = nullptr;
                         }
                     }
                 }
 
                 // Scan
-                if (scan_running == true && h->deviceController != NULL)
+                if (scan_running == true && h->deviceController != nullptr)
                 {
-                    loadingScreen(true);
 /*
                     // Are we scanning the currently selected port? Then go to the loading screen
-                    ControllerAPI *ctrl = NULL;
+                    ControllerAPI *ctrl = nullptr;
                     getCurrentController(ctrl);
-
                     if (h->deviceController == ctrl)
                     {
-                        std::cout << "YES WE ARE" << std::endl;
-                        loadingScreen(true);
+                        helpScreen(true);
                         qApp->processEvents();
                     }
 */
                     // Scan for servo(s)
-                    h->deviceController->autodetect(ui->rangeStart_spinBox->value(), ui->rangeStop_spinBox->value());
+                    h->deviceController->autodetect(h->deviceWidget->getMinRange(),
+                                                    h->deviceWidget->getMaxRange());
 
                     // Controller already in ready state? Wait for the new scan to begin then
                     if (h->deviceController->getState() >= state_scanned)
@@ -628,27 +591,27 @@ void MainWindow::scanServos(QString port_qstring)
                             QString device_txt = "[#" + QString::number(s->getId()) + "]  " + QString::fromStdString(s->getModelString());
                             QTreeWidgetItem *device = new QTreeWidgetItem();
                             port->addChild(device);
-                            if (h->deviceControllerProtocol == 3)
+                            if (h->deviceControllerProtocol == PROTOCOL_HKX)
                             {
                                 device->setIcon(0, QIcon(":/devices/devices/HKX.svg"));
                             }
                             else
                             {
-                                if (h->deviceControllerProtocol == 2)
+                                if (h->deviceControllerProtocol == PROTOCOL_DXLv2)
                                     device->setIcon(0, QIcon(":/devices/devices/DXL.svg")); // DXLv2.svg
-                                else if (h->deviceControllerProtocol == 1)
+                                else if (h->deviceControllerProtocol == PROTOCOL_DXLv1)
                                     device->setIcon(0, QIcon(":/devices/devices/DXL.svg")); // DXLv1.svg
                             }
                             device->setText(0, device_txt);
 
-                            if (tableAutoSelection == false)
+                            if (treewidgetAutoSelection == false)
                             {
                                 // Autoselect first servo
                                 ui->deviceTreeWidget->clearSelection();
                                 device->setSelected(true);
-                                tableAutoSelection = true;
+                                treewidgetAutoSelection = true;
 
-                                loadingScreen(false);
+                                servoScreen();
                                 selfRefreshTimer->start(125);
                             }
                         }
@@ -717,7 +680,7 @@ void MainWindow::scanServos(QString port_qstring)
 
                 // No need to keep this "empty" controller working
                 delete h->deviceController;
-                h->deviceController = NULL;
+                h->deviceController = nullptr;
             }
 
             // Unlock windows size
@@ -726,16 +689,15 @@ void MainWindow::scanServos(QString port_qstring)
             ui->centralWidget->setMinimumSize(0, 0);
             ui->centralWidget->setMaximumSize(4096, 4096);
 
-            h->deviceScan->setEnabled(true);
-
             // Refresh UI
             ui->deviceTreeWidget->update();
         }
     }
 
-    ui->pushScanSerial->setEnabled(true);
-    ui->pushScanServo->setEnabled(true);
+    ui->frameDevices->setEnabled(true);
 }
+
+/* ************************************************************************** */
 
 int MainWindow::getCurrentController(ControllerAPI *&ctrl)
 {
@@ -747,7 +709,7 @@ int MainWindow::getCurrentController(ControllerAPI *&ctrl)
         QTreeWidgetItem *item = ui->deviceTreeWidget->selectedItems().at(0);
 
         // Check if the item exist, plus if this a device and not a port
-        if (item != NULL && item->parent() != NULL)
+        if (item != nullptr && item->parent() != nullptr)
         {
             // Print status?
             std::string port = item->parent()->text(0).toStdString();
@@ -757,11 +719,11 @@ int MainWindow::getCurrentController(ControllerAPI *&ctrl)
             for (auto p: serialPorts)
             {
                 // Found it
-                if (p->deviceName->text().toStdString() == port)
+                if (p->deviceName_str == port)
                 {
                     ctrl = p->deviceController;
 
-                    if (ctrl != NULL)
+                    if (ctrl != nullptr)
                     {
                         retcode = 1;
                     }
@@ -783,7 +745,7 @@ int MainWindow::getCurrentServo(ControllerAPI *&ctrl, int &id)
         QTreeWidgetItem *item = ui->deviceTreeWidget->selectedItems().at(0);
 
         // Check if the item exist, plus if tis a device and not a port
-        if (item != NULL && item->parent() != NULL)
+        if (item != nullptr && item->parent() != nullptr)
         {
             int sid = 0;
 
@@ -810,18 +772,49 @@ int MainWindow::getCurrentServo(ControllerAPI *&ctrl, int &id)
             for (auto p: serialPorts)
             {
                 // We have the port
-                if (p != NULL && p->deviceName->text().toStdString() == port)
+                if (p != nullptr && p->deviceName_str == port)
                 {
                     // We have the servo
                     if (sid >= 0 && sid < 254)
                     {
-                        if (p->deviceController != NULL)
+                        if (p->deviceController != nullptr)
                         {
                             ctrl = p->deviceController;
                             id = sid;
                             retcode = 1;
                         }
                     }
+                }
+            }
+        }
+    }
+
+    return retcode;
+}
+
+int MainWindow::getCurrentSerialPort(SerialPortHelper **port)
+{
+    int retcode = 0;
+
+    // Get selected item
+    if (ui->deviceTreeWidget->selectedItems().size() > 0)
+    {
+        QTreeWidgetItem *item = ui->deviceTreeWidget->selectedItems().at(0);
+
+        // Check if the item exist, plus if this a device and not a port
+        if (item != nullptr && item->parent() == nullptr)
+        {
+            std::string port_name = item->text(0).toStdString();
+
+            // Search for the port into our serialPorts vector
+            for (auto p: serialPorts)
+            {
+                // We found the port
+                if (p != nullptr && p->deviceName_str == port_name)
+                {
+                    //std::cout << "> Serial port: " << port_name << std::endl;
+                    *port = p;
+                    retcode = 1;
                 }
             }
         }
@@ -840,7 +833,7 @@ int MainWindow::getCurrentServo(Servo *&servo)
         QTreeWidgetItem *item = ui->deviceTreeWidget->selectedItems().at(0);
 
         // Check if the item exist, plus if this a device and not a port
-        if (item != NULL && item->parent() != NULL)
+        if (item != nullptr && item->parent() != nullptr)
         {
             int sid = 0;
 
@@ -867,15 +860,15 @@ int MainWindow::getCurrentServo(Servo *&servo)
             for (auto p: serialPorts)
             {
                 // We found the port
-                if (p != NULL && p->deviceName->text().toStdString() == port)
+                if (p != nullptr && p->deviceName_str == port)
                 {
                     // We found the servo
                     if (sid >= 0 && sid < 254)
                     {
-                        if (p->deviceController != NULL)
+                        if (p->deviceController != nullptr)
                         {
                             servo = p->deviceController->getServo(sid);
-                            if (servo != NULL)
+                            if (servo != nullptr)
                             {
                                 retcode = 1;
                             }
@@ -888,6 +881,8 @@ int MainWindow::getCurrentServo(Servo *&servo)
 
     return retcode;
 }
+
+/* ************************************************************************** */
 
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
@@ -905,7 +900,7 @@ void MainWindow::changeEvent(QEvent *event)
             // Pause controllers
             for (SerialPortHelper *p: serialPorts)
             {
-                if (p->deviceController != NULL)
+                if (p->deviceController != nullptr)
                 {
                     p->deviceController->pauseThread();
                 }
@@ -921,7 +916,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // Check if a controller is not currently busy scanning
     for (auto p: serialPorts)
     {
-        if (p->deviceController != NULL)
+        if (p->deviceController != nullptr)
         {
             if (!(p->deviceController->getState() == state_stopped ||
                   p->deviceController->getState() == state_ready ||
@@ -945,32 +940,7 @@ void MainWindow::resizeTabWidgetContent()
 {
     if (ui->tabWidget->currentIndex() == 0)
     {
-/*
-        // FIXME // does not produce expected results
-        int tabWidgetSize = ui->tabWidget->size().width();
-        ui->frame_quickcontrols->setMaximumWidth(tabWidgetSize * 0.40);
-        ui->tableWidget->setMaximumWidth(tabWidgetSize * 0.60);
-*/
-        int error_margin = 14; // (column count) * (grid line size) + (scroll bar size) ?
-        int width_available = ui->tableWidget->size().width();
-        int width_header = ui->tableWidget->verticalHeader()->size().width();
-
-        // Scale register table
-        if (tableServoSerie >= SERVO_HERKULEX)
-        {
-            int width_value_col = 90;
-            int width_description_col = width_available - width_header - width_value_col*2 - error_margin;
-            ui->tableWidget->setColumnWidth(0, width_description_col);
-            ui->tableWidget->setColumnWidth(1, width_value_col);
-            ui->tableWidget->setColumnWidth(2, width_value_col);
-        }
-        else
-        {
-            int width_value_col = 100;
-            int width_description_col = width_available - width_header - width_value_col - error_margin;
-            ui->tableWidget->setColumnWidth(0, width_description_col);
-            ui->tableWidget->setColumnWidth(1, width_value_col);
-        }
+        ui->widgetRT->resizeTableWidget();
     }
     else if (ui->tabWidget->currentIndex() == 1)
     {
@@ -987,13 +957,17 @@ void MainWindow::resizeTabWidgetContent()
     ui->tabWidget->update();
 }
 
-void MainWindow::servoSelection()
+/* ************************************************************************** */
+
+void MainWindow::treewidgetSelection()
 {
-    Servo *servo = NULL;
+    Servo *servo = nullptr;
+    SerialPortHelper *serial = nullptr;
 
     // Get currently selected servo
     if (getCurrentServo(servo) > 0)
     {
+        servoScreen();
         toggleServoPanel(true);
 
         // Contextual menu actions
@@ -1012,7 +986,8 @@ void MainWindow::servoSelection()
         QObject::disconnect(ui->cwlimit, SIGNAL(valueChanged(int)), this, SLOT(moveCWLimit(int)));
         QObject::disconnect(ui->ccwlimit, SIGNAL(valueChanged(int)), this, SLOT(moveCCWLimit(int)));
         QObject::disconnect(ui->gpos, SIGNAL(valueChanged(int)), this, SLOT(moveServo(int)));
-        QObject::disconnect(ui->tableWidget, SIGNAL(cellChanged(int,int)), this, SLOT(modifier(int, int)));
+
+        QObject::disconnect(ui->widgetRT, SIGNAL(cellChangedSignal(int,int)), this, SLOT(modifier(int, int)));
 
         // Adapt to servo model
         ////////////////////////////////////////////////////////////////////////
@@ -1022,73 +997,25 @@ void MainWindow::servoSelection()
 
         // Clean and generate a new register table (if we switch servo serie)
         // and device error box
-        if (servoSerie != tableServoSerie && servoModel != tableServoModel)
+        if (servoSerie != currentServoSerie && servoModel != currentServoModel)
         {
-            generateRegisterTable(servoSerie, servoModel);
+            currentServoSerie = servoSerie;
+            currentServoModel = servoModel;
+            ui->widgetRT->generateRegisterTable(servoSerie, servoModel);
+            ui->widgetStatus->updateVisibility(servoSerie);
 
             if (servoSerie >= SERVO_HERKULEX)
             {
-                ui->frame_err_dxl1->hide();
-                ui->frame_err_dxl2->hide();
-                ui->frame_err_hkx->show();
-
                 ui->servoManual_label->setText("<html><head/><body><p><a href=\"http://hovis.co.kr/guide/herkulex_eng.html\"><span style=\" text-decoration: underline; color:#ffffff;\">Download manuals on Dongbu Robot website</span></a></p></body></html>");
                 ui->copyrightNotice_label->setText("<html><head/><body><p>Technical specifications provided by <a href=\"www.dongburobot.com\"><span style=\" text-decoration: underline; color:#0000ff;\">dongburobot.com</span></a> website.</p></body></html>");
             }
             else
             {
-                ui->frame_err_hkx->hide();
-
-                if (servoSerie >= SERVO_XL)
-                {
-                    ui->frame_err_dxl1->hide();
-                    ui->frame_err_dxl2->show();
-                }
-                else
-                {
-                    ui->frame_err_dxl1->show();
-                    ui->frame_err_dxl2->hide();
-                }
-
                 ui->servoManual_label->setText("<html><head/><body><p><a href=\"http://support.robotis.com/en/\"><span style=\" text-decoration: underline; color:#ffffff;\">Consult the online manuals on Robotis website</span></a></p></body></html>");
                 ui->copyrightNotice_label->setText("<html><head/><body><p>Pictures and technical specifications courtesy of <a href=\"www.robotis.com\"><span style=\" text-decoration: underline; color:#0000ff;\">robotis.com</span></a></p></body></html>");
             }
         }
-/*
-        // Clean and generate a status box (if we swhitch brand)
-        if ((servoSerie < SERVO_HERKULEX && tableServoSerie >= SERVO_HERKULEX) ||
-            (servoSerie >= SERVO_HERKULEX && tableServoSerie < SERVO_HERKULEX) ||
-             ui->groupStatus->layout()->children().isEmpty())
-        {
-            // Clean
-            while (QLayoutItem *item = ui->groupStatus->layout()->takeAt(0))
-            {
-                if (QWidget *widget = item->widget())
-                {
-                    delete widget;
-                }
-                delete item;
-            }
-            ui->groupStatus->update();
 
-            // Regen
-            QWidget *widget = new QWidget;
-            if (servoSerie < SERVO_HERKULEX)
-            {
-                Ui::StatusDXL uistatus;
-                uistatus.setupUi(widget);
-            }
-            else
-            {
-                Ui::StatusHKX uistatus;
-                uistatus.setupUi(widget);
-            }
-
-            ui->groupStatus->layout()->addWidget(widget);
-            ui->groupStatus->show();
-            widget->show();
-        }
-*/
         // Steps
         ui->cwlimit->setRange(0, servo->getSteps() - 1);
         ui->ccwlimit->setRange(0, servo->getSteps() - 1);
@@ -1114,16 +1041,9 @@ void MainWindow::servoSelection()
         ui->cvolt->setPalette(QPalette(QColor(85,85,128)));
         ui->ctemp->setPalette(QPalette(QColor(85,85,128)));
 
-        // Picture and doc
+        // Model specific picture and doc
         QFile servoSpec;
         QPixmap servoIcon;
-
-        int pictureSize = ui->tabWidget->size().height() * 0.33; // All of our pictures are square
-        ui->servoPicture_label->setMaximumWidth(pictureSize);
-        ui->servoPicture_label->setMaximumHeight(pictureSize);
-        ui->servoPicture_label->setScaledContents(true);
-
-        // Model specific
         switch (servoSerie)
         {
         case SERVO_DRS:
@@ -1162,6 +1082,26 @@ void MainWindow::servoSelection()
         case SERVO_XL:
             servoIcon.load(":/devices/devices/XL-320.jpg");
             servoSpec.setFileName(":/specs/specs/XL-320.html");
+            break;
+
+        case SERVO_X:
+            servoIcon.load(":/devices/devices/X-Series.jpg");
+            if (servoModel == SERVO_XH430_V210 || servoModel == SERVO_XH430_W210)
+            {
+                servoSpec.setFileName(":/specs/specs/XH-430-VW210.html");
+            }
+            if (servoModel == SERVO_XH430_V350 || servoModel == SERVO_XH430_W350)
+            {
+                servoSpec.setFileName(":/specs/specs/XH-430-VW350.html");
+            }
+            if (servoModel == SERVO_XM430_W210)
+            {
+                servoSpec.setFileName(":/specs/specs/XM-430-W210.html");
+            }
+            if (servoModel == SERVO_XM430_W350)
+            {
+                servoSpec.setFileName(":/specs/specs/XM-430-W350.html");
+            }
             break;
 
         case SERVO_EX:
@@ -1240,6 +1180,10 @@ void MainWindow::servoSelection()
         }
 
         // Set icon
+        int pictureSize = ui->tabWidget->size().height() * 0.33; // All of our pictures are square
+        ui->servoPicture_label->setMaximumWidth(pictureSize);
+        ui->servoPicture_label->setMaximumHeight(pictureSize);
+        ui->servoPicture_label->setScaledContents(true);
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
         servoIcon.setDevicePixelRatio(qApp->devicePixelRatio());
 #endif
@@ -1260,6 +1204,31 @@ void MainWindow::servoSelection()
         // Read register values and stuff
         servoUpdate();
     }
+    else if (getCurrentSerialPort(&serial) > 0)
+    {
+        // Clean contextual menu
+        ui->deviceTreeWidget->removeAction(refreshAction);
+        ui->deviceTreeWidget->removeAction(rebootAction);
+        ui->deviceTreeWidget->removeAction(resetAction);
+
+        // Show serial screen
+        serialScreen();
+
+        // Populate the serial screen with relevent infos
+        if (serial->deviceControllerDeviceClass > 0)
+        {
+            int deviceCount = 0;
+            if (serial->deviceController)
+                deviceCount = serial->deviceController->getServos().size();
+
+            ui->widget_serial->setInfos(serial->deviceName_str,
+                                        serial->deviceControllerSpeed,
+                                        serial->deviceControllerProtocol,
+                                        deviceCount);
+        }
+
+        resizeTabWidgetContent();
+    }
     else
     {
         // Clean contextual menu
@@ -1267,17 +1236,24 @@ void MainWindow::servoSelection()
         ui->deviceTreeWidget->removeAction(rebootAction);
         ui->deviceTreeWidget->removeAction(resetAction);
 
-        // Clean servo register panel
-        cleanRegisterTable();
-        toggleServoPanel(false);
+        // Show help screen
+        helpScreen(false);
     }
+}
 
-    resizeTabWidgetContent();
+void MainWindow::serialportSelection()
+{
+    //
+}
+
+void MainWindow::servoSelection()
+{
+    //
 }
 
 void MainWindow::servoUpdate()
 {
-    Servo *servo = NULL;
+    Servo *servo = nullptr;
 
     // Get selected servo
     if (getCurrentServo(servo) > 0)
@@ -1294,7 +1270,8 @@ void MainWindow::servoUpdate()
         QObject::disconnect(ui->ccwlimit, SIGNAL(valueChanged(int)), this, SLOT(moveCCWLimit(int)));
         QObject::disconnect(ui->gpos, SIGNAL(valueChanged(int)), this, SLOT(moveServo(int)));
         QObject::disconnect(ui->gpos, SIGNAL(valueChanged(int)), this, SLOT(moveServo(int)));
-        QObject::disconnect(ui->tableWidget, SIGNAL(cellChanged(int,int)), this, SLOT(modifier(int, int)));
+
+        QObject::disconnect(ui->widgetRT, SIGNAL(cellChangedSignal(int,int)), this, SLOT(modifier(int, int)));
 
         // Get servos model infos
         int servoSerie, servoModel;
@@ -1315,7 +1292,11 @@ void MainWindow::servoUpdate()
         // Error handling
         ////////////////////////////////////////////////////////////////////////
 
-        errorHandling(servo, servoSerie, servoModel);
+        ControllerAPI *ctrl = nullptr;
+        if (getCurrentController(ctrl) > 0)
+        {
+            ui->widgetStatus->handleErrors(ctrl, servo, servoSerie, servoModel);
+        }
 
         // Re-connect servo panel slots
         QObject::connect(ui->radioButton_1, SIGNAL(clicked(bool)), this, SLOT(toggleRunningMode()));
@@ -1328,69 +1309,31 @@ void MainWindow::servoUpdate()
         QObject::connect(ui->cwlimit, SIGNAL(valueChanged(int)), this, SLOT(moveCWLimit(int)));
         QObject::connect(ui->ccwlimit, SIGNAL(valueChanged(int)), this, SLOT(moveCCWLimit(int)));
         QObject::connect(ui->gpos, SIGNAL(valueChanged(int)), this, SLOT(moveServo(int)));
-        QObject::connect(ui->tableWidget, SIGNAL(cellChanged(int,int)), this, SLOT(modifier(int, int)));
+
+        QObject::connect(ui->widgetRT, SIGNAL(cellChangedSignal(int,int)), this, SLOT(modifier(int, int)));
     }
     else
     {
-        cleanRegisterTable();
-        toggleServoPanel(false);
+        // the "help" screen should be selected, so nothing to do...
     }
 
     // Update
-    ui->tableWidget->update();
+    ui->widgetRT->updateTable();
 }
+
+/* ************************************************************************** */
 
 void MainWindow::updateRegisterTableHerkuleX(Servo *servo_hkx, const int servoSerie, const int servoModel)
 {
     ServoHerkuleX *servo = static_cast <ServoHerkuleX *>(servo_hkx);
 
-    // EEPROM
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MODEL_NUMBER),1)->setText(QString::fromStdString(servo->getModelString()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_FIRMWARE_VERSION),1)->setText(QString::number(servo->getFirmwareVersion()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_BAUD_RATE),1)->setText(QString::number(servo->getBaudRate()));
-//RESERVED
+    // Update register table
+    ui->widgetRT->updateRegisterTableHerkuleX(servo_hkx, servoSerie, servoModel);
 
-    // EEPROM and RAM
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ID),1)->setText(QString::number(servo->getValue(REG_ID, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ID),2)->setText(QString::number(servo->getValue(REG_ID, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STATUS_RETURN_LEVEL),1)->setText(QString::number(servo->getStatusReturnLevel(REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STATUS_RETURN_LEVEL),2)->setText(QString::number(servo->getStatusReturnLevel(REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ALARM_LED),1)->setText(QString::number(servo->getAlarmLed(REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ALARM_LED),2)->setText(QString::number(servo->getAlarmLed(REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ALARM_SHUTDOWN),1)->setText(QString::number(servo->getAlarmShutdown(REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ALARM_SHUTDOWN),2)->setText(QString::number(servo->getAlarmShutdown(REGISTER_RAM)));
-//RESERVED
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TEMPERATURE_LIMIT),1)->setText(QString::number(servo->getHighestLimitTemp(REGISTER_ROM), 'g', 3) + " *");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TEMPERATURE_LIMIT),2)->setText(QString::number(servo->getHighestLimitTemp(REGISTER_RAM), 'g', 3) + " *");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VOLTAGE_LOWEST_LIMIT),1)->setText(QString::number(servo->getLowestLimitVolt(REGISTER_ROM), 'g', 3) + " V");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VOLTAGE_LOWEST_LIMIT),2)->setText(QString::number(servo->getLowestLimitVolt(REGISTER_RAM), 'g', 3) + " V");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VOLTAGE_HIGHEST_LIMIT),1)->setText(QString::number(servo->getHighestLimitVolt(REGISTER_ROM), 'g', 3) + " V");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VOLTAGE_HIGHEST_LIMIT),2)->setText(QString::number(servo->getHighestLimitVolt(REGISTER_RAM), 'g', 3) + " V");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ACCEL_RATIO),1)->setText(QString::number(servo->getValue(REG_ACCEL_RATIO, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ACCEL_RATIO),2)->setText(QString::number(servo->getValue(REG_ACCEL_RATIO, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MAX_ACCEL_TIME),1)->setText(QString::number(servo->getValue(REG_MAX_ACCEL_TIME, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MAX_ACCEL_TIME),2)->setText(QString::number(servo->getValue(REG_MAX_ACCEL_TIME, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_DEAD_ZONE),1)->setText(QString::number(servo->getValue(REG_DEAD_ZONE, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_DEAD_ZONE),2)->setText(QString::number(servo->getValue(REG_DEAD_ZONE, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_SATURATOR_OFFSET),1)->setText(QString::number(servo->getValue(REG_SATURATOR_OFFSET, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_SATURATOR_OFFSET),2)->setText(QString::number(servo->getValue(REG_SATURATOR_OFFSET, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_SATURATOR_SLOPE),1)->setText(QString::number(servo->getValue(REG_SATURATOR_SLOPE, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_SATURATOR_SLOPE),2)->setText(QString::number(servo->getValue(REG_SATURATOR_SLOPE, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_OFFSET),1)->setText(QString::number(servo->getValue(REG_PWM_OFFSET, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_OFFSET),2)->setText(QString::number(servo->getValue(REG_PWM_OFFSET, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_MIN),1)->setText(QString::number(servo->getValue(REG_PWM_MIN, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_MIN),2)->setText(QString::number(servo->getValue(REG_PWM_MIN, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_MAX),1)->setText(QString::number(servo->getValue(REG_PWM_MAX, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_MAX),2)->setText(QString::number(servo->getValue(REG_PWM_MAX, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_OVERLOAD_THRESHOLD),1)->setText(QString::number(servo->getValue(REG_PWM_OVERLOAD_THRESHOLD, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM_OVERLOAD_THRESHOLD),2)->setText(QString::number(servo->getValue(REG_PWM_OVERLOAD_THRESHOLD, REGISTER_RAM)));
-
+    // Update servo panel
     int cwlimit = servo->getCwAngleLimit(REGISTER_ROM);
     int ccwlimit = servo->getCcwAngleLimit(REGISTER_ROM);
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MIN_POSITION),1)->setText(QString::number(cwlimit));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MIN_POSITION),2)->setText(QString::number(servo->getCwAngleLimit(REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MAX_POSITION),1)->setText(QString::number(ccwlimit));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MAX_POSITION),2)->setText(QString::number(servo->getCcwAngleLimit(REGISTER_RAM)));
+
     ui->cwlimit->setValue(cwlimit);
     ui->ccwlimit->setValue(ccwlimit);
     ui->cwlimit_label->setText(tr("MIN position (") + QString::number(cwlimit) + ")");
@@ -1410,52 +1353,9 @@ void MainWindow::updateRegisterTableHerkuleX(Servo *servo_hkx, const int servoSe
         ui->radioButton_1->setChecked(true);
     }
 
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_D_GAIN),1)->setText(QString::number(servo->getDGain(REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_D_GAIN),2)->setText(QString::number(servo->getDGain(REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_I_GAIN),1)->setText(QString::number(servo->getIGain(REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_I_GAIN),2)->setText(QString::number(servo->getIGain(REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_P_GAIN),1)->setText(QString::number(servo->getPGain(REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_P_GAIN),2)->setText(QString::number(servo->getPGain(REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_POS_FEED_FRW_1st_GAIN),1)->setText(QString::number(0));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_POS_FEED_FRW_1st_GAIN),2)->setText(QString::number(0));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_POS_FEED_FRW_2nd_GAIN),1)->setText(QString::number(0));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_POS_FEED_FRW_2nd_GAIN),2)->setText(QString::number(0));
-    if (servoModel == SERVO_DRS_0402 || servoModel == SERVO_DRS_0602)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VELOCITY_KP),2)->setText(QString::number(servo->getValue(REG_VELOCITY_KP)));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VELOCITY_KI),2)->setText(QString::number(servo->getValue(REG_VELOCITY_KI)));
-    }
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_LED_BLINKING),1)->setText(QString::number(servo->getValue(REG_LED_BLINKING, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_LED_BLINKING),2)->setText(QString::number(servo->getValue(REG_LED_BLINKING, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ADC_FAULT_CHECK_PRD),1)->setText(QString::number(servo->getValue(REG_ADC_FAULT_CHECK_PRD, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ADC_FAULT_CHECK_PRD),2)->setText(QString::number(servo->getValue(REG_ADC_FAULT_CHECK_PRD, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PKT_GARBAGE_CHECK_PRD),1)->setText(QString::number(servo->getValue(REG_PKT_GARBAGE_CHECK_PRD, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PKT_GARBAGE_CHECK_PRD),2)->setText(QString::number(servo->getValue(REG_PKT_GARBAGE_CHECK_PRD, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STOP_DETECTION_PRD),1)->setText(QString::number(servo->getValue(REG_STOP_DETECTION_PRD, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STOP_DETECTION_PRD),2)->setText(QString::number(servo->getValue(REG_STOP_DETECTION_PRD, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_OVERLOAD_DETECTION_PRD),1)->setText(QString::number(servo->getValue(REG_OVERLOAD_DETECTION_PRD, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_OVERLOAD_DETECTION_PRD),2)->setText(QString::number(servo->getValue(REG_OVERLOAD_DETECTION_PRD, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STOP_THRESHOLD),1)->setText(QString::number(servo->getValue(REG_STOP_THRESHOLD, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STOP_THRESHOLD),2)->setText(QString::number(servo->getValue(REG_STOP_THRESHOLD, REGISTER_RAM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_INPOSITION_MARGIN),1)->setText(QString::number(servo->getValue(REG_INPOSITION_MARGIN, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_INPOSITION_MARGIN),2)->setText(QString::number(servo->getValue(REG_INPOSITION_MARGIN, REGISTER_RAM)));
-//RESERVED
-//RESERVED
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CALIBRATION_DIFFERENCE),1)->setText(QString::number(servo->getValue(REG_CALIBRATION_DIFFERENCE, REGISTER_ROM)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CALIBRATION_DIFFERENCE),2)->setText(QString::number(servo->getValue(REG_CALIBRATION_DIFFERENCE, REGISTER_RAM)));
 
-    //RAM
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STATUS_ERROR),2)->setText(QString::number(servo->getValue(REG_STATUS_ERROR)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STATUS_DETAIL),2)->setText(QString::number(servo->getValue(REG_STATUS_DETAIL)));
-    if (servoModel == SERVO_DRS_0402 || servoModel == SERVO_DRS_0602)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_AUX_1),2)->setText(QString::number(servo->getValue(REG_AUX_1)));
-    }
-//RESERVED
     int torque_enable = servo->getValue(REG_TORQUE_ENABLE);
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TORQUE_ENABLE),2)->setText(QString::number(torque_enable));
     ui->torque_checkBox->setChecked(torque_enable);
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_LED),2)->setText(QString::number(servo->getValue(REG_LED)));
 
     double ctemp = servo->getCurrentTemperature();
     if (ctemp > servo->getHighestLimitTemp(REGISTER_ROM))
@@ -1469,11 +1369,9 @@ void MainWindow::updateRegisterTableHerkuleX(Servo *servo_hkx, const int servoSe
     }
 
     ui->ctemp->display(ctemp);
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_TEMPERATURE),2)->setText(QString::number(ctemp, 'g', 3) + " *");
 
     double cvolt = servo->getCurrentVoltage();
     ui->cvolt->display(cvolt);
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_VOLTAGE),2)->setText(QString::number(cvolt, 'g', 3) + " V");
     if (cvolt < servo->getLowestLimitVolt(REGISTER_ROM) || cvolt > servo->getHighestLimitVolt(REGISTER_ROM))
     {
         // Warn if servo voltage is out of boundaries
@@ -1484,42 +1382,26 @@ void MainWindow::updateRegisterTableHerkuleX(Servo *servo_hkx, const int servoSe
         ui->cvolt->setPalette(QPalette(QColor(85,85,127)));
     }
 
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_CONTROL_MODE),2)->setText(QString::number(servo->getValue(REG_CURRENT_CONTROL_MODE)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TICK),2)->setText(QString::number(servo->getValue(REG_TICK)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CALIBRATED_POSITION),2)->setText(QString::number(servo->getValue(REG_CALIBRATED_POSITION)));
     int cpos = servo->getValue(REG_ABSOLUTE_POSITION);
     ui->cpos->setValue(cpos);
     ui->cpos_label->setText(tr("Current (") + QString::number(cpos) + ")");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ABSOLUTE_POSITION),2)->setText(QString::number(cpos));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_DIFFERENTIAL_POSITION),2)->setText(QString::number(servo->getValue(REG_DIFFERENTIAL_POSITION)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PWM),2)->setText(QString::number(servo->getValue(REG_PWM)));
-    if (servoModel == SERVO_DRS_0402 || servoModel == SERVO_DRS_0602)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ABSOLUTE_2nd_POSITION),2)->setText(QString::number(servo->getValue(REG_ABSOLUTE_2nd_POSITION)));
-    }
+
     int gpos = servo->getValue(REG_ABSOLUTE_GOAL_POSITION);
     ui->gpos->setValue(gpos);
     ui->gpos_label->setText(tr("Goal (") + QString::number(gpos) + ")");
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ABSOLUTE_GOAL_POSITION),2)->setText(QString::number(gpos));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_TRAJECTORY),2)->setText(QString::number(servo->getValue(REG_GOAL_TRAJECTORY)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_VELOCITY),2)->setText(QString::number(servo->getValue(REG_GOAL_VELOCITY)));
 }
 
 void MainWindow::updateRegisterTableDynamixel(Servo *servo_dxl, const int servoSerie, const int servoModel)
 {
     ServoDynamixel *servo = static_cast <ServoDynamixel *>(servo_dxl);
 
-    // EEPROM
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MODEL_NUMBER),1)->setText(QString::fromStdString(servo->getModelString()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_FIRMWARE_VERSION),1)->setText(QString::number(servo->getFirmwareVersion()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ID),1)->setText(QString::number(servo->getValue(REG_ID)));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_BAUD_RATE),1)->setText(QString::number(servo->getBaudRate()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_RETURN_DELAY_TIME),1)->setText(QString::number(servo->getReturnDelay()));
+    // Update register table
+    ui->widgetRT->updateRegisterTableDynamixel(servo_dxl, servoSerie, servoModel);
 
+    // Update servo panel
+    // EEPROM
     int cwlimit = servo->getCwAngleLimit();
     int ccwlimit = servo->getCcwAngleLimit();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MIN_POSITION),1)->setText(QString::number(cwlimit));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MAX_POSITION),1)->setText(QString::number(ccwlimit));
     ui->cwlimit->setValue(cwlimit);
     ui->ccwlimit->setValue(ccwlimit);
     ui->cwlimit_label->setText(tr("MIN position (") + QString::number(cwlimit) + ")");
@@ -1539,79 +1421,32 @@ void MainWindow::updateRegisterTableDynamixel(Servo *servo_dxl, const int servoS
         ui->radioButton_1->setChecked(true);
     }
 
-    if (servoSerie == SERVO_EX || servoModel == SERVO_MX106)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_DRIVE_MODE),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getDriveMode()));
-    }
-    else if (servoSerie == SERVO_XL || servoModel == SERVO_XL320)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CONTROL_MODE),1)->setText(QString::number(static_cast<ServoXL*>(servo)->getControlMode()));
-    }
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TEMPERATURE_LIMIT),1)->setText(QString::number(servo->getHighestLimitTemp()) + " *");
     double dlow_volt_limit = servo->getLowestLimitVolt();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VOLTAGE_LOWEST_LIMIT),1)->setText(QString::number(dlow_volt_limit) + " V");
     double dhigh_volt_limit = servo->getHighestLimitVolt();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_VOLTAGE_HIGHEST_LIMIT),1)->setText(QString::number(dhigh_volt_limit) + " V");
     int max_torque = servo->getMaxTorque();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MAX_TORQUE),1)->setText(QString::number(max_torque));
     ui->maxTorqueSlider->setValue(max_torque);
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_STATUS_RETURN_LEVEL),1)->setText(QString::number(servo->getStatusReturnLevel()));
-    if (servoModel != SERVO_XL320)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ALARM_LED),1)->setText(QString::number(servo->getAlarmLed()));
-    }
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_ALARM_SHUTDOWN),1)->setText(QString::number(servo->getAlarmShutdown()));
-
-    if (servoSerie == SERVO_MX)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MULTI_TURN_OFFSET),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getMultiTurnOffset()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_RESOLUTION_DIVIDER),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getResolutionDivider()));
-    }
 
     // RAM
     int torque_enable = servo->getTorqueEnabled();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TORQUE_ENABLE),1)->setText(QString::number(torque_enable));
     ui->torque_checkBox->setChecked(torque_enable);
     int led = servo->getLed();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_LED),1)->setText(QString::number(led));
     ui->led_checkBox->setChecked(led);
-    if (servoSerie != SERVO_MX && servoSerie != SERVO_XL)
-    {
-        // Only on AX, DX, RX and EX
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CW_COMPLIANCE_MARGIN),1)->setText(QString::number(static_cast<ServoAX*>(servo)->getCwComplianceMargin()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CCW_COMPLIANCE_MARGIN),1)->setText(QString::number(static_cast<ServoAX*>(servo)->getCcwComplianceMargin()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CW_COMPLIANCE_SLOPE),1)->setText(QString::number(static_cast<ServoAX*>(servo)->getCwComplianceSlope()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CCW_COMPLIANCE_SLOPE),1)->setText(QString::number(static_cast<ServoAX*>(servo)->getCcwComplianceSlope()));
-    }
-    else
-    {
-        // Only on MX and XL-320
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_D_GAIN),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getDGain()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_I_GAIN),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getIGain()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_P_GAIN),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getPGain()));
-    }
+
     int gpos = servo->getGoalPosition();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_POSITION),1)->setText(QString::number(gpos));
     ui->gpos->setValue(gpos);
     ui->gpos_label->setText(tr("Goal (") + QString::number(gpos) + ")");
     int mspeed = servo->getMovingSpeed();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_SPEED),1)->setText(QString::number(mspeed));
     ui->movingSpeedSlider->setValue(mspeed);
     if (servoModel != SERVO_XL320)
     {
         int tlimit = servo->getTorqueLimit();
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_TORQUE_LIMIT),1)->setText(QString::number(tlimit));
         ui->torqueLimitSlider->setValue(tlimit);
     }
     int cpos = servo->getCurrentPosition();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_POSITION),1)->setText(QString::number(cpos));
     ui->cpos->setValue(cpos);
     ui->cpos_label->setText(tr("Current (") + QString::number(cpos) + ")");
 
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_SPEED),1)->setText(QString::number(servo->getCurrentSpeed()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_LOAD),1)->setText(QString::number(servo->getCurrentLoad()));
     double dcvolt = servo->getCurrentVoltage();
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_VOLTAGE),1)->setText(QString::number(dcvolt) + " V");
     ui->cvolt->display(dcvolt);
     if (dcvolt < dlow_volt_limit || dcvolt > dhigh_volt_limit)
     {
@@ -1633,782 +1468,29 @@ void MainWindow::updateRegisterTableDynamixel(Servo *servo_dxl, const int servoS
     {
         ui->ctemp->setPalette(QPalette(QColor(85,85,127)));
     }
-
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_TEMPERATURE),1)->setText(QString::number(ctemp) + " *");
     ui->ctemp->display(ctemp);
-
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_REGISTERED),1)->setText(QString::number(servo->getRegistered()));
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_MOVING),1)->setText(QString::number(servo->getMoving()));
-    if (servoModel != SERVO_XL320)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_LOCK),1)->setText(QString::number(servo->getLock()));
-    }
-    ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_PUNCH),1)->setText(QString::number(servo->getPunch()));
-
-    if (servoSerie == SERVO_EX)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_CURRENT),1)->setText(QString::number(static_cast<ServoEX*>(servo)->getSensedCurrent()));
-    }
-    else if (servoSerie == SERVO_MX)
-    {
-        if (servoModel == SERVO_MX64 || servoModel == SERVO_MX106)
-        {
-            ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CURRENT_CURRENT),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getConsumingCurrent()));
-            ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_CONTROL_MODE),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getTorqueControlMode()));
-            ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_TORQUE),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getGoalTorque()));
-        }
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_ACCELERATION),1)->setText(QString::number(static_cast<ServoMX*>(servo)->getGoalAccel()));
-    }
-    else if (servoSerie == SERVO_XL || servoModel == SERVO_XL320)
-    {
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_GOAL_TORQUE),1)->setText(QString::number(static_cast<ServoXL*>(servo)->getGoalTorque()));
-        ui->tableWidget->item(getTableIndex(servoSerie, servoModel, REG_HW_ERROR_STATUS),1)->setText(QString::number(static_cast<ServoXL*>(servo)->getHardwareErrorStatus()));
-    }
 }
 
-void MainWindow::errorHandling(Servo *servo, const int servoSerie, const int servoModel)
-{
-    QString css_comm_ok("color: white;\nborder: 1px solid rgb(85, 170, 0);\nbackground: rgba(85, 200, 0, 128);");
-    QString css_error("border: 1px solid rgb(255, 53, 3);\nbackground: rgba(255, 170, 0, 128);\ncolor: white;");
-    QString css_status("border-top: 1px solid rgb(10, 100, 255);\nborder-bottom: 1px solid rgb(10, 100, 255);\nbackground: rgba(255, 248, 191, 128);\ncolor: rgb(246, 130, 9);");
-    QString css_ok_middle("border-top: 1px solid rgb(10, 100, 255);\nborder-bottom: 1px solid rgb(10, 100, 255);\nbackground: rgba(12, 170, 255, 128);\ncolor: white;");
-    QString css_ok_left("border-left: 1px solid rgb(10, 100, 255);\nborder-top: 1px solid rgb(10, 100, 255);\nborder-bottom: 1px solid rgb(10, 100, 255);\nbackground: rgba(12, 170, 255, 128);\ncolor: white;");
-    QString css_ok_right("border-right: 1px solid rgb(10, 100, 255);\nborder-top: 1px solid rgb(10, 100, 255);\nborder-bottom: 1px solid rgb(10, 100, 255);\nbackground: rgba(12, 170, 255, 128);\ncolor: white;");
+/* ************************************************************************** */
 
-    ControllerAPI *ctrl = NULL;
+void MainWindow::clearErrors()
+{
+    ControllerAPI *ctrl = nullptr;
     if (getCurrentController(ctrl) > 0)
     {
-        if (ctrl->getErrorCount() > 0)
-        {
-            ui->serialLinkErrors_label2->setStyleSheet(css_error);
-        }
-        else
-        {
-            ui->serialLinkErrors_label2->setStyleSheet(css_comm_ok);
-        }
+        ctrl->clearErrorCount();
     }
 
-    if (servo)
+    Servo *servo = nullptr;
+    if (getCurrentServo(servo) > 0)
     {
-        int srv_error = servo->getError();
-        if (servoSerie >= SERVO_HERKULEX)
-        {
-            int srv_status = servo->getStatus();
-
-            if (srv_error & ERRBIT_VOLTAGE)
-                { ui->label_err_vin_2->setStyleSheet(css_error); }
-            else
-                { ui->label_err_vin_2->setStyleSheet(css_ok_left); }
-
-            if (srv_error & ERRBIT_ALLOWED_POT)
-                { ui->label_err_angle_2->setStyleSheet(css_error); }
-            else
-                { ui->label_err_angle_2->setStyleSheet(css_ok_middle); }
-
-            if (srv_error & ERRBIT_OVERHEAT)
-                { ui->label_err_heat_2->setStyleSheet(css_error); }
-            else
-                { ui->label_err_heat_2->setStyleSheet(css_ok_middle); }
-
-            if (srv_status & STATBIT_MOVING)
-                { ui->label_stat_moving->setStyleSheet(css_status); }
-            else
-                { ui->label_stat_moving->setStyleSheet(css_ok_left); }
-
-            if (srv_status & STATBIT_INPOSITION)
-                { ui->label_stat_inpos->setStyleSheet(css_status); }
-            else
-                { ui->label_stat_inpos->setStyleSheet(css_ok_middle); }
-
-            if (srv_error & ERRBIT_INVALID_PKT)
-            {
-                ui->label_err_packet->setStyleSheet(css_status);
-
-                if (srv_status & STATBIT_CHECKSUM_FLAG)
-                    { ui->label_stat_crc->setStyleSheet(css_error); }
-                else
-                    { ui->label_stat_crc->setStyleSheet(css_ok_middle); }
-
-                if (srv_status & STATBIT_UNKWOWN_CMD)
-                    { ui->label_stat_cmd->setStyleSheet(css_error); }
-                else
-                    { ui->label_stat_cmd->setStyleSheet(css_ok_middle); }
-
-                if (srv_status & STATBIT_RANGE)
-                    { ui->label_stat_addr->setStyleSheet(css_error); }
-                else
-                    { ui->label_stat_addr->setStyleSheet(css_ok_middle); }
-
-                if (srv_status & STATBIT_GARBAGE)
-                    { ui->label_stat_gbg->setStyleSheet(css_error); }
-                else
-                    { ui->label_stat_gbg->setStyleSheet(css_ok_middle); }
-            }
-            else
-            { ui->label_err_packet->setStyleSheet(css_ok_middle); }
-
-            if (srv_status & STATBIT_TORQUE_ON)
-                { ui->label_stat_ton->setStyleSheet(css_status); }
-            else
-                { ui->label_stat_ton->setStyleSheet(css_ok_right); }
-
-            if (srv_error & ERRBIT_OVERLOAD)
-                { ui->label_err_overload_2->setStyleSheet(css_error); }
-            else
-                { ui->label_err_overload_2->setStyleSheet(css_ok_middle); }
-
-            if (srv_error & ERRBIT_DRIVER_FAULT)
-                { ui->label_err_driver->setStyleSheet(css_error); }
-            else
-                { ui->label_err_driver->setStyleSheet(css_ok_middle); }
-
-            if (srv_error & ERRBIT_EEP_REG_DIST)
-                { ui->label_err_eep->setStyleSheet(css_error); }
-            else
-                { ui->label_err_eep->setStyleSheet(css_ok_right); }
-        }
-        else
-        {
-            if (servoSerie >= SERVO_XL)
-            {
-                if (srv_error == ERRBIT2_RESULT)
-                    { ui->label_err_res->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_res->setStyleSheet(css_ok_left); }
-
-                if (srv_error == ERRBIT2_INSTRUCTION)
-                    { ui->label_err_cmd_2->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_cmd_2->setStyleSheet(css_ok_middle); }
-
-                if (srv_error == ERRBIT2_CHECKSUM)
-                    { ui->label_err_crc_2->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_crc_2->setStyleSheet(css_ok_middle); }
-
-                if (srv_error == ERRBIT2_DATA_RANGE)
-                    { ui->label_err_range_2->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_range_2->setStyleSheet(css_ok_middle); }
-
-                if (srv_error == ERRBIT2_DATA_LENGTH)
-                    { ui->label_err_length->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_length->setStyleSheet(css_ok_middle); }
-
-                if (srv_error == ERRBIT2_DATA_LIMIT)
-                    { ui->label_err_limit->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_limit->setStyleSheet(css_ok_middle); }
-
-                if (srv_error == ERRBIT2_ACCESS)
-                    { ui->label_err_access->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_access->setStyleSheet(css_ok_right); }
-            }
-            else
-            {
-                if (srv_error & 0x01)
-                    { ui->label_err_vin->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_vin->setStyleSheet(css_ok_right); }
-
-                if (srv_error & 0x02)
-                    { ui->label_err_angle->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_angle->setStyleSheet(css_ok_middle); }
-
-                if (srv_error & 0x04)
-                    { ui->label_err_heat->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_heat->setStyleSheet(css_ok_middle); }
-
-                if (srv_error & 0x08)
-                    { ui->label_err_range->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_range->setStyleSheet(css_ok_middle); }
-
-                if (srv_error & 0x10)
-                    { ui->label_err_crc->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_crc->setStyleSheet(css_ok_middle); }
-
-                if (srv_error & 0x20)
-                    { ui->label_err_overload->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_overload->setStyleSheet(css_ok_middle); }
-
-                if (srv_error & 0x40)
-                    { ui->label_err_cmd->setStyleSheet(css_error); }
-                else
-                    { ui->label_err_cmd->setStyleSheet(css_ok_left); }
-            }
-        }
+        servo->clearErrors();
     }
+
+    ui->widgetStatus->handleErrors(ctrl, servo, 0, 0);
 }
 
-int MainWindow::getRegisterNameFromTableIndex(const int servo_serie, const int servo_model, int table_index)
-{
-    int reg_name = -1;
-
-    // Perform reverse lookup
-    const int (*ct)[8] = getRegisterTable(servo_serie, servo_model);
-
-    for (int i = 0; i < static_cast<int>(getRegisterCount(ct)); i++)
-    {
-        int reg_name_tmp = getRegisterName(ct, i);
-
-        if (table_index == getTableIndex(servo_serie, servo_model, reg_name_tmp))
-        {
-            reg_name = reg_name_tmp;
-            break;
-        }
-    }
-
-    return reg_name;
-}
-
-int MainWindow::getTableIndex(const int servo_serie, const int servo_model, int reg_name)
-{
-    const int (*ct)[8] = getRegisterTable(servo_serie, servo_model);
-    int index = getRegisterTableIndex(ct, reg_name);
-    int addr_rom = getRegisterAddr(ct, reg_name, REGISTER_ROM);
-    int addr_ram = getRegisterAddr(ct, reg_name, REGISTER_RAM);
-
-    if (index > -1)
-    {
-        if (servo_serie >= SERVO_HERKULEX)
-        {
-            if (addr_rom > -1 && addr_ram < 0)
-            {
-                index += 1;
-            }
-            else if (addr_rom > -1 && addr_ram > -1)
-            {
-                index += 2;
-            }
-            else if (addr_rom < 0 && addr_ram > -1)
-            {
-                index += 3;
-            }
-        }
-        else //if (servo_serie >= SERVO_DYNAMIXEL)
-        {
-            if (addr_rom > -1)
-            {
-                index += 1;
-            }
-            else if (addr_ram > -1)
-            {
-                index += 2;
-            }
-        }
-    }
-    else
-    {
-        index = 0; // Fallback and write in the first row (should be EEPROM legend)
-    }
-
-    return index;
-}
-
-void MainWindow::generateRegisterTable(const int servo_serie, const int servo_model)
-{
-    // Remove all rows
-    for (int i = ui->tableWidget->rowCount(); i >= 0; i--)
-    {
-        ui->tableWidget->removeRow(i);
-    }
-
-    // Change table format when switching between Dynamixel and HerkuleX devices
-    // > Add/remove a new row and change the table legend
-
-    if (servo_serie >= SERVO_HERKULEX)
-    {
-        if (servo_serie != tableServoSerie)
-        {
-            ui->tableWidget->setColumnHidden(2, false);
-            ui->tableWidget->horizontalHeaderItem(1)->setText(tr("ROM Value"));
-            ui->tableWidget->horizontalHeaderItem(2)->setText(tr("RAM Value"));
-        }
-
-        // Generate new table
-        generateRegisterTableHerkuleX(servo_serie, servo_model);
-    }
-    else // if (servo_serie >= SERVO_DYNAMIXEL)
-    {
-        if (servo_serie != tableServoSerie)
-        {
-            ui->tableWidget->setColumnHidden(2, true);
-            ui->tableWidget->horizontalHeaderItem(1)->setText(tr("Value"));
-        }
-
-        // Generate new table
-        generateRegisterTableDynamixel(servo_serie, servo_model);
-    }
-
-    // Save table params
-    tableServoSerie = servo_serie;
-    tableServoModel = servo_model;
-
-    // Update
-    ui->tableWidget->update();
-}
-
-void MainWindow::generateRegisterTableHerkuleX(const int servo_serie, const int servo_model)
-{
-    int row = 0;
-    const int (*ct)[8] = getRegisterTable(servo_serie, servo_model);
-    QFont font("Helvetica", 12, QFont::Bold);
-    QColor legend(85, 85, 127, 128);
-    QColor grey(200, 200, 200, 100);
-    QColor white(255, 255, 255, 255);
-    QColor green(85, 170, 0, 64);
-    QColor orange(255, 170, 0, 64);
-    QBrush br_ro(orange, Qt::Dense4Pattern);
-    QBrush br_rw(green, Qt::Dense4Pattern);
-
-    // 'EEPROM ONLY'
-    ////////////////////////////////////////////////////////////////////////
-
-    // Add 'EEPROM ONLY' legend
-    {
-        ui->tableWidget->insertRow(row);
-        ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(""));
-        QTableWidgetItem *item_title = new QTableWidgetItem(tr("EEPROM registers"));
-        item_title->setFont(font);
-        item_title->setTextColor(white);
-        item_title->setFlags(item_title->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_title->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 0, item_title);
-        QTableWidgetItem *item_spacer1 = new QTableWidgetItem("");
-        item_spacer1->setFlags(item_spacer1->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer1->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 1, item_spacer1);
-        QTableWidgetItem *item_spacer2 = new QTableWidgetItem("");
-        item_spacer2->setFlags(item_spacer2->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer2->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 2, item_spacer2);
-        row++;
-    }
-
-    // Add 'EEPROM ONLY' registers
-    for (int i = 0; i < static_cast<int>(getRegisterCount(ct)); i++)
-    {
-        int reg_name = getRegisterName(ct, i);
-        if (reg_name < 0)
-        {
-            //std::cerr << "[ERROR bad index] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr_rom = getRegisterAddr(ct, reg_name, REGISTER_ROM);
-        if (reg_addr_rom < 0)
-        {
-            //std::cerr << "[ERROR bad name] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr_ram = getRegisterAddr(ct, reg_name, REGISTER_RAM);
-        if (reg_addr_ram >= 0)
-        {
-            //std::cerr << "[ERROR not ROM only register] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-
-        {
-            ui->tableWidget->insertRow(row);
-
-            std::string regdesc_str = getRegisterDescriptionTxt(reg_name);
-            QString regdesc_qstr(regdesc_str.c_str());
-            //std::cout << "ROM reg id/" << i << " (of " << getRegisterCount(ct) << ") addr/" << reg_addr << " name/" << regdesc << std::endl;
-
-            QTableWidgetItem *description = new QTableWidgetItem(regdesc_qstr);
-            QTableWidgetItem *rom_value = new QTableWidgetItem("");
-            QTableWidgetItem *ram_value = new QTableWidgetItem("");
-            description->setFlags(description->flags() ^ Qt::ItemIsEditable);
-            if (getRegisterAccessMode(ct, reg_name) == READ_ONLY)
-            {
-                description->setBackgroundColor(orange);
-                rom_value->setBackgroundColor(orange);
-                rom_value->setTextAlignment(Qt::AlignCenter);
-                rom_value->setFlags(rom_value->flags() ^ Qt::ItemIsEditable);
-                ram_value->setBackground(br_ro);
-                ram_value->setFlags(ram_value->flags() ^ Qt::ItemIsEditable);
-            }
-            else
-            {
-                description->setBackgroundColor(green);
-                rom_value->setBackgroundColor(green);
-                rom_value->setTextAlignment(Qt::AlignCenter);
-                ram_value->setBackground(br_rw);
-                ram_value->setFlags(ram_value->flags() ^ Qt::ItemIsEditable);
-            }
-            ui->tableWidget->setItem(row, 0, description);
-            ui->tableWidget->setItem(row, 1, rom_value);
-            ui->tableWidget->setItem(row, 2, ram_value);
-
-            QString addr;
-            addr.setNum(reg_addr_rom, 16);
-            addr = addr.toUpper();
-            if (addr.size() == 1) { addr.prepend("0x0"); } else { addr.prepend("0x"); }
-            ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(addr));
-
-            //
-            row++;
-        }
-    }
-
-    // 'EEPROM' and 'RAM'
-    ////////////////////////////////////////////////////////////////////////
-
-    // Add 'EEPROM' and 'RAM' legend
-    {
-        ui->tableWidget->insertRow(row);
-        ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(""));
-        QTableWidgetItem *item_title = new QTableWidgetItem(tr("Registers"));
-        item_title->setFont(font);
-        item_title->setTextColor(white);
-        item_title->setFlags(item_title->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_title->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 0, item_title);
-        QTableWidgetItem *item_spacer1 = new QTableWidgetItem("");
-        item_spacer1->setFlags(item_spacer1->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer1->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 1, item_spacer1);
-        QTableWidgetItem *item_spacer2 = new QTableWidgetItem("");
-        item_spacer2->setFlags(item_spacer2->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer2->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 2, item_spacer2);
-        row++;
-    }
-
-    // Add 'EEPROM' and 'RAM' registers
-    for (int i = 0; i < static_cast<int>(getRegisterCount(ct)); i++)
-    {
-        int reg_name = getRegisterName(ct, i);
-        if (reg_name < 0)
-        {
-            //std::cerr << "[ERROR bad index] RAM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr_rom = getRegisterAddr(ct, reg_name, REGISTER_ROM);
-        if (reg_addr_rom < 0)
-        {
-            //std::cerr << "[ERROR not ROM/RAM register] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr_ram = getRegisterAddr(ct, reg_name, REGISTER_RAM);
-        if (reg_addr_ram < 0)
-        {
-            //std::cerr << "[ERROR not ROM/RAM register] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-
-        {
-            ui->tableWidget->insertRow(row);
-
-            std::string regdesc_str = getRegisterDescriptionTxt(reg_name);
-            QString regdesc_qstr(regdesc_str.c_str());
-            //std::cout << "reg id/" << i << " (of " << getRegisterCount(ct) << ") addr/" << reg_addr << " name/" << regdesc << std::endl;
-
-            QTableWidgetItem *description = new QTableWidgetItem(regdesc_qstr);
-            QTableWidgetItem *rom_value = new QTableWidgetItem("");
-            QTableWidgetItem *ram_value = new QTableWidgetItem("");
-            description->setFlags(description->flags() ^ Qt::ItemIsEditable);
-            if (getRegisterAccessMode(ct, reg_name) == READ_ONLY)
-            {
-                description->setBackgroundColor(orange);
-                rom_value->setBackgroundColor(grey);
-                rom_value->setTextAlignment(Qt::AlignCenter);
-                rom_value->setFlags(rom_value->flags() ^ Qt::ItemIsEditable);
-                ram_value->setBackgroundColor(orange);
-                ram_value->setTextAlignment(Qt::AlignCenter);
-                ram_value->setFlags(ram_value->flags() ^ Qt::ItemIsEditable);
-            }
-            else
-            {
-                description->setBackgroundColor(green);
-                rom_value->setBackgroundColor(green);
-                rom_value->setTextAlignment(Qt::AlignCenter);
-                ram_value->setBackgroundColor(green);
-                ram_value->setTextAlignment(Qt::AlignCenter);
-            }
-
-            ui->tableWidget->setItem(row, 0, description);
-            ui->tableWidget->setItem(row, 1, rom_value);
-            ui->tableWidget->setItem(row, 2, ram_value);
-            ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(""));
-
-            //
-            row++;
-        }
-    }
-
-    // 'RAM ONLY'
-    ////////////////////////////////////////////////////////////////////////
-
-    // Add 'RAM ONLY' legend
-    {
-        ui->tableWidget->insertRow(row);
-        ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(""));
-        QTableWidgetItem *item_title = new QTableWidgetItem(tr("RAM registers"));
-        item_title->setFont(font);
-        item_title->setTextColor(white);
-        item_title->setFlags(item_title->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_title->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 0, item_title);
-        QTableWidgetItem *item_spacer1 = new QTableWidgetItem("");
-        item_spacer1->setFlags(item_spacer1->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer1->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 1, item_spacer1);
-        QTableWidgetItem *item_spacer2 = new QTableWidgetItem("");
-        item_spacer2->setFlags(item_spacer2->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer2->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 2, item_spacer2);
-        row++;
-    }
-
-    // Add 'RAM ONLY' registers
-    for (int i = 0; i < static_cast<int>(getRegisterCount(ct)); i++)
-    {
-        int reg_name = getRegisterName(ct, i);
-        if (reg_name < 0)
-        {
-            //std::cerr << "[ERROR bad index] RAM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr_rom = getRegisterAddr(ct, reg_name, REGISTER_ROM);
-        if (reg_addr_rom >= 0)
-        {
-            //std::cerr << "[ERROR bad name] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr_ram = getRegisterAddr(ct, reg_name, REGISTER_RAM);
-        if (reg_addr_ram < 0)
-        {
-            //std::cerr << "[ERROR not RAM only register] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-
-        {
-            ui->tableWidget->insertRow(row);
-
-            std::string regdesc_str = getRegisterDescriptionTxt(reg_name);
-            QString regdesc_qstr(regdesc_str.c_str());
-            //std::cout << "RAM reg id/" << i << " (of " << getRegisterCount(ct) << ") addr/" << reg_addr << " name/" << regdesc << std::endl;
-
-            QTableWidgetItem *description = new QTableWidgetItem(regdesc_qstr);
-            QTableWidgetItem *rom_value = new QTableWidgetItem("");
-            QTableWidgetItem *ram_value = new QTableWidgetItem("");
-            description->setFlags(description->flags() ^ Qt::ItemIsEditable);
-            if (getRegisterAccessMode(ct, reg_name) == READ_ONLY)
-            {
-                description->setBackgroundColor(orange);
-                rom_value->setBackground(br_ro);
-                rom_value->setFlags(rom_value->flags() ^ Qt::ItemIsEditable);
-                ram_value->setBackgroundColor(orange);
-                ram_value->setTextAlignment(Qt::AlignCenter);
-                ram_value->setFlags(ram_value->flags() ^ Qt::ItemIsEditable);
-            }
-            else
-            {
-                description->setBackgroundColor(green);
-                rom_value->setBackground(br_rw);
-                rom_value->setFlags(rom_value->flags() ^ Qt::ItemIsEditable);
-                ram_value->setBackgroundColor(green);
-                ram_value->setTextAlignment(Qt::AlignCenter);
-            }
-
-            ui->tableWidget->setItem(row, 0, description);
-            ui->tableWidget->setItem(row, 1, rom_value);
-            ui->tableWidget->setItem(row, 2, ram_value);
-
-            QString addr;
-            addr.setNum(reg_addr_ram, 16);
-            addr = addr.toUpper();
-            if (addr.size() == 1) { addr.prepend("0x0"); } else { addr.prepend("0x"); }
-            ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(addr));
-
-            //
-            row++;
-        }
-    }
-    //std::cout << "2] Row count (ADDED): " << ui->tableWidget->rowCount() << std::endl;
-}
-
-void MainWindow::generateRegisterTableDynamixel(const int servo_serie, const int servo_model)
-{
-    int row = 0;
-    const int (*ct)[8] = getRegisterTable(servo_serie, servo_model);
-    QFont font("Helvetica", 12, QFont::Bold);
-    QColor legend(85, 85, 127, 128);
-    QColor white(255, 255, 255, 255);
-    QColor green(85, 170, 0, 64);
-    QColor orange(255, 170, 0, 64);
-
-    // 'EEPROM'
-    ////////////////////////////////////////////////////////////////////////
-
-    // Add 'EEPROM' row legend
-    {
-        ui->tableWidget->insertRow(row);
-        ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(""));
-        QTableWidgetItem *item_title = new QTableWidgetItem(tr("EEPROM registers"));
-        item_title->setFont(font);
-        item_title->setTextColor(white);
-        item_title->setFlags(item_title->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_title->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 0, item_title);
-        QTableWidgetItem *item_spacer1 = new QTableWidgetItem("");
-        item_spacer1->setFlags(item_spacer1->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer1->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 1, item_spacer1);
-        row++;
-    }
-
-    // Add ROM row registers
-    for (int i = 0; i < static_cast<int>(getRegisterCount(ct)); i++)
-    {
-        int reg_name = getRegisterName(ct, i);
-        if (reg_name < 0)
-        {
-            //std::cerr << "[ERROR bad index] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr = getRegisterAddr(ct, reg_name, REGISTER_ROM);
-        if (reg_addr < 0)
-        {
-            //std::cerr << "[ERROR bad name] ROM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-
-        {
-            ui->tableWidget->insertRow(row);
-
-            std::string regdesc_str = getRegisterDescriptionTxt(reg_name);
-            QString regdesc_qstr(regdesc_str.c_str());
-            //std::cout << "ROM reg id/" << i << " (of " << getRegisterCount(ct) << ") addr/" << reg_addr << " name/" << regdesc << std::endl;
-
-            QTableWidgetItem *description = new QTableWidgetItem(regdesc_qstr);
-            QTableWidgetItem *rom_value = new QTableWidgetItem("");
-            description->setFlags(description->flags() ^ Qt::ItemIsEditable);
-            if (getRegisterAccessMode(ct, reg_name) == READ_ONLY)
-            {
-                description->setBackgroundColor(orange);
-                rom_value->setBackgroundColor(orange);
-                rom_value->setTextAlignment(Qt::AlignCenter);
-                rom_value->setFlags(rom_value->flags() ^ Qt::ItemIsEditable);
-            }
-            else
-            {
-                description->setBackgroundColor(green);
-                rom_value->setBackgroundColor(green);
-                rom_value->setTextAlignment(Qt::AlignCenter);
-            }
-            ui->tableWidget->setItem(row, 0, description);
-            ui->tableWidget->setItem(row, 1, rom_value);
-
-            QString addr;
-            addr.setNum(reg_addr, 16);
-            addr = addr.toUpper();
-            if (addr.size() == 1) { addr.prepend("0x0"); } else { addr.prepend("0x"); }
-            ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(addr));
-
-            //
-            row++;
-        }
-    }
-
-    // 'RAM'
-    ////////////////////////////////////////////////////////////////////////
-
-    // Add 'RAM' row legend
-    {
-        ui->tableWidget->insertRow(row);
-        ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(""));
-        QTableWidgetItem *item_title = new QTableWidgetItem(tr("RAM registers"));
-        item_title->setFont(font);
-        item_title->setTextColor(white);
-        item_title->setFlags(item_title->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_title->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 0, item_title);
-        QTableWidgetItem *item_spacer1 = new QTableWidgetItem("");
-        item_spacer1->setFlags(item_spacer1->flags() ^ Qt::ItemIsEditable ^ Qt::ItemIsSelectable);
-        item_spacer1->setBackgroundColor(legend);
-        ui->tableWidget->setItem(row, 1, item_spacer1);
-        row++;
-    }
-
-    // Add RAM registers
-    for (int i = 0; i < static_cast<int>(getRegisterCount(ct)); i++)
-    {
-        int reg_name = getRegisterName(ct, i);
-        if (reg_name < 0)
-        {
-            //std::cerr << "[ERROR bad index] RAM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-        int reg_addr = getRegisterAddr(ct, reg_name, REGISTER_RAM);
-        if (reg_addr < 0)
-        {
-            //std::cerr << "[ERROR bad name] RAM reg id/" << i << " addr/" << -1 << std::endl;
-            continue;
-        }
-
-        {
-            ui->tableWidget->insertRow(row);
-
-            std::string regdesc_str = getRegisterDescriptionTxt(reg_name);
-            QString regdesc_qstr(regdesc_str.c_str());
-            //std::cout << "RAM reg id/" << i << " (of " << getRegisterCount(ct) << ") addr/" << reg_addr << " name/" << regdesc << std::endl;
-
-            QTableWidgetItem *description = new QTableWidgetItem(regdesc_qstr);
-            QTableWidgetItem *ram_value = new QTableWidgetItem("");
-            description->setFlags(description->flags() ^ Qt::ItemIsEditable);
-            if (getRegisterAccessMode(ct, reg_name) == READ_ONLY)
-            {
-                description->setBackgroundColor(orange);
-                ram_value->setBackgroundColor(orange);
-                ram_value->setTextAlignment(Qt::AlignCenter);
-                ram_value->setFlags(ram_value->flags() ^ Qt::ItemIsEditable);
-            }
-            else
-            {
-                description->setBackgroundColor(green);
-                ram_value->setBackgroundColor(green);
-                ram_value->setTextAlignment(Qt::AlignCenter);
-            }
-
-            ui->tableWidget->setItem(row, 0, description);
-            ui->tableWidget->setItem(row, 1, ram_value);
-
-            QString addr;
-            addr.setNum(reg_addr, 16);
-            addr = addr.toUpper();
-            if (addr.size() == 1) { addr.prepend("0x0"); } else { addr.prepend("0x"); }
-            ui->tableWidget->setVerticalHeaderItem(row, new QTableWidgetItem(addr));
-
-            //
-            row++;
-        }
-    }
-    //std::cout << "2] Row count (ADDED): " << ui->tableWidget->rowCount() << std::endl;
-}
-
-void MainWindow::cleanRegisterTable()
-{
-    QObject::disconnect(ui->tableWidget, SIGNAL(cellChanged(int,int)), this, SLOT(modifier(int, int)));
-
-    for (int i = 0; i < ui->tableWidget->rowCount(); i++)
-    {
-        ui->tableWidget->item(i, 1)->setText("");
-        if (tableServoSerie >= SERVO_HERKULEX)
-        {
-            ui->tableWidget->item(i, 2)->setText("");
-        }
-    }
-
-    QObject::connect(ui->tableWidget, SIGNAL(cellChanged(int,int)), this, SLOT(modifier(int, int)));
-}
+/* ************************************************************************** */
 
 void MainWindow::toggleServoPanel(bool status)
 {
@@ -2459,7 +1541,7 @@ void MainWindow::toggleServoPanel(bool status)
     ui->gpos->setEnabled(status);
 
     // Status box
-    ui->frameStatus->setVisible(status);
+    ui->widgetStatus->setVisible(status);
 
     // Infos
     ui->servoManual_label->setVisible(status);
@@ -2473,7 +1555,7 @@ void MainWindow::advanceScannerStart()
     // Check if a controller is not currently busy scanning or reading
     for (auto p: serialPorts)
     {
-        if (p->deviceController != NULL)
+        if (p->deviceController != nullptr)
         {
             if (!(p->deviceController->getState() == state_stopped ||
                   p->deviceController->getState() == state_scanned ||
@@ -2484,12 +1566,12 @@ void MainWindow::advanceScannerStart()
         }
     }
 
-    if (asw == NULL)
+    if (asw == nullptr)
     {
         // Pause controllers
         for (auto p: serialPorts)
         {
-            if (p->deviceController != NULL)
+            if (p->deviceController != nullptr)
             {
                 p->deviceController->pauseThread();
             }
@@ -2507,12 +1589,12 @@ void MainWindow::advanceScannerStart()
 
 void MainWindow::advanceScannerStop()
 {
-    if (asw != NULL)
+    if (asw != nullptr)
     {
         // Un-pause controllers
         for (auto p: serialPorts)
         {
-            if (p->deviceController != NULL)
+            if (p->deviceController != nullptr)
             {
                 p->deviceController->pauseThread();
             }
@@ -2523,7 +1605,7 @@ void MainWindow::advanceScannerStop()
 
         // Delete the advance scanner window
         delete asw;
-        asw = NULL;
+        asw = nullptr;
     }
 }
 
@@ -2531,7 +1613,7 @@ void MainWindow::advanceScannerStop()
 
 void MainWindow::settingsStart()
 {
-    if (stw == NULL)
+    if (stw == nullptr)
     {
         stw = new Settings();
         stw->show();
@@ -2544,7 +1626,7 @@ void MainWindow::settingsStart()
 
 void MainWindow::settingsStop()
 {
-    if (asw != NULL)
+    if (asw != nullptr)
     {
         asw->hide();
     }
@@ -2567,7 +1649,7 @@ void MainWindow::aboutQt()
 
 void MainWindow::resetServo()
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2609,7 +1691,7 @@ void MainWindow::resetServo()
 
 void MainWindow::rebootServo()
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2620,7 +1702,7 @@ void MainWindow::rebootServo()
 
 void MainWindow::refreshServo()
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2631,28 +1713,9 @@ void MainWindow::refreshServo()
 
 /* ************************************************************************** */
 
-void MainWindow::clearErrors()
-{
-    ControllerAPI *c = NULL;
-
-    if (getCurrentController(c) > 0)
-    {
-        c->clearErrorCount();
-    }
-
-    Servo *s = NULL;
-
-    if (getCurrentServo(s) > 0)
-    {
-        s->clearErrors();
-    }
-}
-
-/* ************************************************************************** */
-
 void MainWindow::toggleRunningMode()
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2716,7 +1779,7 @@ void MainWindow::toggleRunningMode()
 
 void MainWindow::toggleTorque(bool torque)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2730,7 +1793,7 @@ void MainWindow::toggleTorque(bool torque)
 
 void MainWindow::toggleLED(bool led)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2744,7 +1807,7 @@ void MainWindow::toggleLED(bool led)
 
 void MainWindow::moveMaxTorque(int torque)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2752,7 +1815,7 @@ void MainWindow::moveMaxTorque(int torque)
         //std::cout << "moveMaxTorque(#" << s->getId() << " / torque:" << torque << ")" << std::endl;
 
         // Update max torque
-        if (tableServoSerie < SERVO_HERKULEX)
+        if (currentServoSerie < SERVO_HERKULEX)
         {
             static_cast<ServoDynamixel*>(s)->setMaxTorque(torque);
         }
@@ -2761,7 +1824,7 @@ void MainWindow::moveMaxTorque(int torque)
 
 void MainWindow::moveTorqueLimit(int limit)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2769,7 +1832,7 @@ void MainWindow::moveTorqueLimit(int limit)
         //std::cout << "moveTorqueLimit(#" << s->getId() << " / limit:" << limit << ")" << std::endl;
 
         // Update torque limit
-        if (tableServoSerie == SERVO_XL)
+        if (currentServoSerie == SERVO_XL)
         {
             s->setValue(REG_GOAL_TORQUE, limit);
         }
@@ -2782,7 +1845,7 @@ void MainWindow::moveTorqueLimit(int limit)
 
 void MainWindow::moveMovingSpeed(int speed)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2790,7 +1853,7 @@ void MainWindow::moveMovingSpeed(int speed)
         //std::cout << "moveMovingSpeed(#" << s->getId() << " / moving speed:" << speed << ")" << std::endl;
 
         // Update moving speed
-        if (tableServoSerie < SERVO_HERKULEX)
+        if (currentServoSerie < SERVO_HERKULEX)
         {
             static_cast<ServoDynamixel*>(s)->setMovingSpeed(speed);
         }
@@ -2799,7 +1862,7 @@ void MainWindow::moveMovingSpeed(int speed)
 
 void MainWindow::moveCWLimit(int limit)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2815,7 +1878,7 @@ void MainWindow::moveCWLimit(int limit)
 
 void MainWindow::moveCCWLimit(int limit)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2831,7 +1894,7 @@ void MainWindow::moveCCWLimit(int limit)
 
 void MainWindow::moveServo(int goal)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
@@ -2847,16 +1910,16 @@ void MainWindow::moveServo(int goal)
 
 void MainWindow::modifier(int row, int column)
 {
-    Servo *s = NULL;
+    Servo *s = nullptr;
 
     // Get selected servo
     if (getCurrentServo(s) > 0)
     {
-        int reg_value = ui->tableWidget->item(row, column)->text().toInt();
-        int reg_name = getRegisterNameFromTableIndex(tableServoSerie, tableServoModel, row);
+        int reg_value = ui->widgetRT->getRegisterValueFromTableIndex(row, column);
+        int reg_name = ui->widgetRT->getRegisterNameFromTableIndex(currentServoSerie, currentServoModel, row);
         int reg_type = REGISTER_AUTO;
 
-        if (tableServoSerie >= SERVO_HERKULEX)
+        if (currentServoSerie >= SERVO_HERKULEX)
         {
             if (column == 1)
                 reg_type = REGISTER_ROM;
@@ -2884,7 +1947,7 @@ void MainWindow::modifier(int row, int column)
                 QTreeWidgetItem *item = ui->deviceTreeWidget->selectedItems().at(0);
 
                 // Check if the item exist, plus if this a device and not a port
-                if (item != NULL && item->parent() != NULL)
+                if (item != nullptr && item->parent() != nullptr)
                 {
                     // Finaly change the item text
                     QString device_txt = "[#" + QString::number(reg_value) + "]  " + QString::fromStdString(s->getModelString());

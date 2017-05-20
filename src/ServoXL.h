@@ -35,10 +35,14 @@
 
 /*!
  * \brief XL servo serie.
- *
- * This servo serie use the new "protocol v2", also used by the Dynamixel PRO serie.
+ * \ref ServoDynamixel
+ * \ref XL320_control_table
+ * \note The X series use the new "protocol v2", also used by the Dynamixel PRO serie.
+
  * More informations about them on Robotis website:
- * - http://support.robotis.com/en/product/dynamixel/xl-320.htm
+ * - http://www.robotis.us/dynamixel-xl-320/
+ * - http://support.robotis.com/en/product/actuator/dynamixel_x/xl-series_main.htm
+ * - http://support.robotis.com/en/product/actuator/dynamixel_x/xl_series/xl-320.htm
  */
 class ServoXL: public ServoDynamixel
 {
@@ -46,25 +50,25 @@ public:
     ServoXL(int dynamixel_id, int dynamixel_model, int control_mode = SPEED_MANUAL);
     ~ServoXL();
 
-    // Not available on XL-320:
+    // Not available on X series:
     int getAlarmLed();
     void setAlarmLed();
     int getLock();
     void setLock();
 
     // Getters
-    int getControlMode(); // Only on XL-320
+    int getControlMode(); // Only on X series
     int getDGain();
     int getIGain();
     int getPGain();
     int getGoalTorque();
-    int getHardwareErrorStatus(); // Only on XL-320
+    int getHardwareErrorStatus(); // Only on X series
 
     // Setters
-    void setId(int id); //! XL-320 ids are in range [0;252] instead of [0;253]
+    void setId(int id); //! X series ids are in range [0;252] instead of [0;253]
     void setError(const int error);
 };
 
 /** @}*/
 
-#endif /* SERVO_XL_H */
+#endif // SERVO_XL_H

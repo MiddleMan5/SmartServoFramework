@@ -39,7 +39,7 @@ HerkuleXSimpleAPI::HerkuleXSimpleAPI(int servoSerie)
             ackPolicy = 1;
             maxId = 253;
 
-            protocolVersion = 1;
+            protocolVersion = PROTOCOL_HKX;
             servoSerie = SERVO_DRS;
 
             if (servoSerie == SERVO_DRS_0402 || servoSerie == SERVO_DRS_0602)
@@ -55,7 +55,7 @@ HerkuleXSimpleAPI::HerkuleXSimpleAPI(int servoSerie)
                 ct = DRS0101_control_table;
             }
 
-            TRACE_INFO(DAPI, "- Using HerkuleX communication protocol\n");
+            TRACE_INFO(DAPI, "- Using HerkuleX communication protocol");
         }
         else //if (servos >= SERVO_DYNAMIXEL)
         {
@@ -64,20 +64,26 @@ HerkuleXSimpleAPI::HerkuleXSimpleAPI(int servoSerie)
 
             if (servoSerie >= SERVO_PRO)
             {
-                protocolVersion = 2;
+                protocolVersion = PROTOCOL_DXLv2;
                 servoSerie = SERVO_PRO;
                 ct = PRO_control_table;
             }
+            else if (servoSerie >= SERVO_X)
+            {
+                protocolVersion = PROTOCOL_DXLv2;
+                servoSerie = SERVO_X;
+                ct = XMXH_control_table;
+            }
             else if (servoSerie >= SERVO_XL)
             {
-                protocolVersion = 2;
+                protocolVersion = PROTOCOL_DXLv2;
                 servoSerie = SERVO_XL;
                 ct = XL320_control_table;
             }
-            else // if (servos >= SERVO_MX)
+            else // SERVO AX to MX
             {
                 // We set the servo serie to 'MX' which is the more capable of the Dynamixel v1 serie
-                protocolVersion = 1;
+                protocolVersion = PROTOCOL_DXLv1;
                 servoSerie = SERVO_MX;
                 ct = MX_control_table;
 
@@ -92,19 +98,19 @@ HerkuleXSimpleAPI::HerkuleXSimpleAPI(int servoSerie)
                 }
             }
 
-            if (protocolVersion == 2)
+            if (protocolVersion == PROTOCOL_DXLv2)
             {
-                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 2\n");
+                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 2");
             }
             else
             {
-                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 1\n");
+                TRACE_INFO(DAPI, "- Using Dynamixel communication protocol version 1");
             }
         }
     }
     else
     {
-        TRACE_WARNING(DAPI, "Warning: Unknown servo serie!\n");
+        TRACE_WARNING(DAPI, "Warning: Unknown servo serie!");
     }
 }
 
@@ -137,11 +143,11 @@ bool HerkuleXSimpleAPI::checkId(const int id, const bool broadcast)
     {
         if (id == BROADCAST_ID && broadcast == false)
         {
-            TRACE_ERROR(DAPI, "Error: Broadcast ID is disabled for the current instruction.\n");
+            TRACE_ERROR(DAPI, "Error: Broadcast ID is disabled for the current instruction.");
         }
         else
         {
-            TRACE_ERROR(DAPI, "Error: ID '%i' is out of [0;%i] boundaries.\n", id, maxId);
+            TRACE_ERROR(DAPI, "Error: ID '%i' is out of [0;%i] boundaries.", id, maxId);
         }
     }
 
@@ -158,7 +164,7 @@ std::vector <int> HerkuleXSimpleAPI::servoScan(int start, int stop)
         stop = maxId;
 
 
-    TRACE_INFO(DAPI, "> Scanning for HerkuleX devices on '%s'... Range is [%i,%i]\n",
+    TRACE_INFO(DAPI, "> Scanning for HerkuleX devices on '%s'... Range is [%i,%i]",
                serialGetCurrentDevice().c_str(), start, stop);
 
     // A vector of HerkuleX IDs found during the scan
@@ -175,16 +181,16 @@ std::vector <int> HerkuleXSimpleAPI::servoScan(int start, int stop)
 
             ids.push_back(id);
 
-            TRACE_INFO(DAPI, "[#%i] HerkuleX servo found!\n", id);
-            TRACE_INFO(DAPI, "[#%i] model: %i (%s)\n", id, pingstats.model_number, hkx_get_model_name(pingstats.model_number).c_str());
+            TRACE_INFO(DAPI, "[#%i] HerkuleX servo found!", id);
+            TRACE_INFO(DAPI, "[#%i] model: %i (%s)", id, pingstats.model_number, hkx_get_model_name(pingstats.model_number).c_str());
 
             // Other informations, not printed by default:
-            TRACE_1(DAPI, "[#%i] firmware: %i\n", id, pingstats.firmware_version);
-            TRACE_1(DAPI, "[#%i] position: %i\n", id, readCurrentPosition(id));
-            TRACE_1(DAPI, "[#%i] speed: %i\n", id, readCurrentSpeed(id));
-            TRACE_1(DAPI, "[#%i] torque: %i\n", id, getTorqueEnabled(id));
-            TRACE_1(DAPI, "[#%i] load: %i\n", id, readCurrentLoad(id));
-            TRACE_1(DAPI, "[#%i] baudrate: %i\n", id, getSetting(id, REG_BAUD_RATE));
+            TRACE_1(DAPI, "[#%i] firmware: %i", id, pingstats.firmware_version);
+            TRACE_1(DAPI, "[#%i] position: %i", id, readCurrentPosition(id));
+            TRACE_1(DAPI, "[#%i] speed: %i", id, readCurrentSpeed(id));
+            TRACE_1(DAPI, "[#%i] torque: %i", id, getTorqueEnabled(id));
+            TRACE_1(DAPI, "[#%i] load: %i", id, readCurrentLoad(id));
+            TRACE_1(DAPI, "[#%i] baudrate: %i", id, getSetting(id, REG_BAUD_RATE));
 
             setLed(id, 0);
         }
@@ -255,12 +261,12 @@ int HerkuleXSimpleAPI::readFirmwareVersion(const int id)
     return value;
 }
 
-int HerkuleXSimpleAPI::changeId(const int old_id, const int new_id)
+int HerkuleXSimpleAPI::changeId(const int id, const int new_id)
 {
     int status = 0;
 
     // Check 'old' ID
-    if (checkId(old_id, false) == true)
+    if (checkId(id, false) == true)
     {
         // Check 'new' ID // Valid IDs are in range [0:maxId]
         if ((new_id >= 0) && (new_id <= maxId))
@@ -270,19 +276,19 @@ int HerkuleXSimpleAPI::changeId(const int old_id, const int new_id)
 
             if (hkx_get_com_status() == COMM_RXSUCCESS)
             {
-                TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: already in use\n", old_id, new_id);
+                TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: already in use", id, new_id);
             }
             else
             {
                 int addr_rom = getRegisterAddr(ct, REG_ID, REGISTER_ROM);
-                hkx_write_byte(old_id, addr_rom, new_id, REGISTER_ROM);
+                hkx_write_byte(id, addr_rom, new_id, REGISTER_ROM);
                 if (hkx_print_error() == 0)
                 {
                     status = 1;
                 }
 
                 int addr_ram = getRegisterAddr(ct, REG_ID, REGISTER_RAM);
-                hkx_write_byte(old_id, addr_ram, new_id, REGISTER_RAM);
+                hkx_write_byte(id, addr_ram, new_id, REGISTER_RAM);
                 if (hkx_print_error() == 0)
                 {
                     status = 1;
@@ -291,7 +297,7 @@ int HerkuleXSimpleAPI::changeId(const int old_id, const int new_id)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: out of range\n", old_id, new_id);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set new ID '%i' for this servo: out of range", id, new_id);
         }
     }
 
@@ -323,7 +329,7 @@ int HerkuleXSimpleAPI::changeBaudRate(const int id, const int baudnum)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set new baudnum '%i' for this servo: out of range\n", id, baudnum);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set new baudnum '%i' for this servo: out of range", id, baudnum);
         }
     }
 
@@ -376,7 +382,7 @@ int HerkuleXSimpleAPI::setMinMaxPositions(const int id, const int min, const int
         // Valid positions are in range [0:1023] for most servo series, and [0:4095] for high-end servo series
         if ((min < 0) || (min > 4095) || (max < 0) || (max > 4095))
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set new min/max positions '%i/%i' for this servo: out of range\n", id, min, max);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set new min/max positions '%i/%i' for this servo: out of range", id, min, max);
         }
         else
         {
@@ -467,7 +473,7 @@ int HerkuleXSimpleAPI::setTorqueEnabled(const int id, int torque)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set torque_enabled '%i' for this servo: out of range\n", id, torque);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set torque_enabled '%i' for this servo: out of range", id, torque);
         }
     }
 
@@ -583,7 +589,7 @@ int HerkuleXSimpleAPI::setGoalPosition(const int id, const int position)
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range\n", id, position);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range", id, position);
         }
     }
 
@@ -609,7 +615,7 @@ int HerkuleXSimpleAPI::setGoalPosition(const int id, const int position, const i
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range\n", id, position);
+            TRACE_ERROR(DAPI, "[#%i] Cannot set goal position '%i' for this servo: out of range", id, position);
         }
     }
 
@@ -712,7 +718,7 @@ int HerkuleXSimpleAPI::getSetting(const int id, const int reg_name, int reg_type
         // Device detection
         const int (*cctt)[8] = getRegisterTable(device);
 
-        if (cctt == NULL)
+        if (cctt == nullptr)
         {
             // Using default control table from this SimpleAPI isntance
             cctt = ct;
@@ -775,17 +781,17 @@ int HerkuleXSimpleAPI::getSetting(const int id, const int reg_name, int reg_type
             }
             else
             {
-                TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [REGISTER NAME ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+                TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [REGISTER NAME ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
             }
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [CONTROL TABLE ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+            TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [CONTROL TABLE ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
         }
     }
     else
     {
-        TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [DEVICE ID ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+        TRACE_ERROR(DAPI, "[#%i] getSetting(reg %i / %s) [DEVICE ID ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
     }
 
     return value;
@@ -800,7 +806,7 @@ int HerkuleXSimpleAPI::setSetting(const int id, const int reg_name, const int re
         // Device detection
         const int (*cctt)[8] = getRegisterTable(device);
 
-        if (cctt == NULL)
+        if (cctt == nullptr)
         {
             // Using default control table from this SimpleAPI isntance
             cctt = ct;
@@ -870,28 +876,28 @@ int HerkuleXSimpleAPI::setSetting(const int id, const int reg_name, const int re
                     }
                     else
                     {
-                        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [VALUE ERROR] (min: %i / max: %i)\n",
+                        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [VALUE ERROR] (min: %i / max: %i)",
                                     id, reg_name, getRegisterNameTxt(reg_name).c_str(), infos.reg_value_min, infos.reg_value_max);
                     }
                 }
                 else
                 {
-                    TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER ACCESS ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+                    TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER ACCESS ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
                 }
             }
             else
             {
-                TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER NAME ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+                TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [REGISTER NAME ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
             }
         }
         else
         {
-            TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [CONTROL TABLE ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+            TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [CONTROL TABLE ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
         }
     }
     else
     {
-        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [DEVICE ID ERROR]\n", id, reg_name, getRegisterNameTxt(reg_name).c_str());
+        TRACE_ERROR(DAPI, "[#%i] setSetting(reg %i / %s) [DEVICE ID ERROR]", id, reg_name, getRegisterNameTxt(reg_name).c_str());
     }
 
     return status;

@@ -51,8 +51,12 @@ void HerkuleXController::updateInternalSettings()
             ackPolicy = 1;
             maxId = 253;
 
-            protocolVersion = 1;
-            TRACE_INFO(CAPI, "- Using HerkuleX communication protocol\n");
+            protocolVersion = PROTOCOL_HKX;
+            TRACE_INFO(CAPI, "- Using HerkuleX communication protocol");
+        }
+        else if (servoSerie >= SENSOR_DYNAMIXEL)
+        {
+            // TODO
         }
         else if (servoSerie >= SERVO_DYNAMIXEL)
         {
@@ -61,11 +65,11 @@ void HerkuleXController::updateInternalSettings()
 
             if (servoSerie >= SERVO_XL)
             {
-                protocolVersion = 2;
+                protocolVersion = PROTOCOL_DXLv2;
             }
             else // SERVO AX to MX
             {
-                protocolVersion = 1;
+                protocolVersion = PROTOCOL_DXLv1;
 
                 if (serialDevice == SERIAL_USB2AX)
                 {
@@ -78,19 +82,19 @@ void HerkuleXController::updateInternalSettings()
                 }
             }
 
-            if (protocolVersion == 2)
+            if (protocolVersion == PROTOCOL_DXLv2)
             {
-                TRACE_INFO(CAPI, "- Using Dynamixel communication protocol version 2\n");
+                TRACE_INFO(CAPI, "- Using Dynamixel communication protocol version 2");
             }
             else
             {
-                TRACE_INFO(CAPI, "- Using Dynamixel communication protocol version 1\n");
+                TRACE_INFO(CAPI, "- Using Dynamixel communication protocol version 1");
             }
         }
     }
     else
     {
-        TRACE_WARNING(CAPI, "Warning: Unknown servo serie!\n");
+        TRACE_WARNING(CAPI, "Warning: Unknown servo serie!");
     }
 }
 
@@ -157,10 +161,10 @@ void HerkuleXController::autodetect_internal(int start, int stop)
     serialSetLatency(8);
 #endif
 
-    TRACE_INFO(CAPI, "HKX ctrl_device_autodetect(port: '%s' / tid: '%i')\n",
+    TRACE_INFO(CAPI, "HKX ctrl_device_autodetect(port: '%s' / tid: '%i')",
                serialGetCurrentDevice().c_str(), std::this_thread::get_id());
 
-    TRACE_INFO(CAPI, "> THREADED Scanning for HKX devices on '%s', range is [%i,%i[\n",
+    TRACE_INFO(CAPI, "> THREADED Scanning for HKX devices on '%s', range is [%i,%i[",
                serialGetCurrentDevice().c_str(), start, stop);
 
     for (int id = start; id <= stop; id++)
@@ -174,9 +178,9 @@ void HerkuleXController::autodetect_internal(int start, int stop)
 
             int serie, model;
             hkx_get_model_infos(pingstats.model_number, serie, model);
-            ServoHerkuleX *servo = NULL;
+            ServoHerkuleX *servo = nullptr;
 
-            TRACE_INFO(HKX, "[#%i] %s servo found!\n", id, hkx_get_model_name(pingstats.model_number).c_str());
+            TRACE_INFO(HKX, "[#%i] %s servo found!", id, hkx_get_model_name(pingstats.model_number).c_str());
 
             // Instanciate the device found
             switch (serie)
@@ -189,7 +193,7 @@ void HerkuleXController::autodetect_internal(int start, int stop)
                 break;
             }
 
-            if (servo != NULL)
+            if (servo != nullptr)
             {
                 servoListLock.lock();
 
@@ -221,7 +225,7 @@ void HerkuleXController::autodetect_internal(int start, int stop)
 
 void HerkuleXController::run()
 {
-    TRACE_INFO(CAPI, "HerkuleXController::run(port: '%s' / tid: '%i')\n",
+    TRACE_INFO(CAPI, "HerkuleXController::run(port: '%s' / tid: '%i')",
                serialGetCurrentDevice().c_str(), std::this_thread::get_id());
 
     std::chrono::time_point<std::chrono::system_clock> start, end;
@@ -268,14 +272,14 @@ void HerkuleXController::run()
                 break;
 
             case ctrl_state_pause:
-                TRACE_INFO(CAPI, ">> THREAD (tid: '%i') paused by message\n", std::this_thread::get_id());
+                TRACE_INFO(CAPI, ">> THREAD (tid: '%i') paused by message", std::this_thread::get_id());
                 m_mutex.lock();
                 m_queue.pop_front();
                 m_mutex.unlock();
                 return;
                 break;
             case ctrl_state_stop:
-                TRACE_INFO(CAPI, ">> THREAD (tid: '%i') termination by 'stop message'\n", std::this_thread::get_id());
+                TRACE_INFO(CAPI, ">> THREAD (tid: '%i') termination by 'stop message'", std::this_thread::get_id());
                 m_mutex.lock();
                 m_queue.pop_front();
                 m_mutex.unlock();
@@ -283,7 +287,7 @@ void HerkuleXController::run()
                 break;
 
             default:
-                TRACE_WARNING(HKX, "Unknown message type: '%i'\n", m.msg);
+                TRACE_WARNING(HKX, "Unknown message type: '%i'", m.msg);
                 break;
             }
 
@@ -308,7 +312,7 @@ void HerkuleXController::run()
             {
                 // Every servo register value will be updated
                 updateList.push_back(id);
-                TRACE_INFO(HKX, "Refresh servo #%i registers\n", id);
+                TRACE_INFO(HKX, "Refresh servo #%i registers", id);
             }
 
             if (rebootProgrammed == 1)
@@ -331,9 +335,9 @@ void HerkuleXController::run()
 
                 // Reboot
                 hkx_reboot(id, ack);
-                TRACE_INFO(HKX, "Rebooting servo #%i...\n", id);
+                TRACE_INFO(HKX, "Rebooting servo #%i...", id);
 
-                miniMessages m {ctrl_device_delayed_add, std::chrono::system_clock::now() + std::chrono::seconds(2), NULL, id, 1};
+                miniMessages m {ctrl_device_delayed_add, std::chrono::system_clock::now() + std::chrono::seconds(2), nullptr, id, 1};
                 sendMessage(&m);
             }
 
@@ -357,9 +361,9 @@ void HerkuleXController::run()
 
                 // Reset
                 hkx_reset(id, resetProgrammed, ack);
-                TRACE_INFO(HKX, "Resetting servo #%i (setting: %i)...\n", id, resetProgrammed);
+                TRACE_INFO(HKX, "Resetting servo #%i (setting: %i)...", id, resetProgrammed);
 
-                miniMessages m {ctrl_device_delayed_add, std::chrono::system_clock::now() + std::chrono::seconds(2), NULL, id, 1};
+                miniMessages m {ctrl_device_delayed_add, std::chrono::system_clock::now() + std::chrono::seconds(2), nullptr, id, 1};
                 sendMessage(&m);
             }
         }
@@ -472,7 +476,7 @@ void HerkuleXController::run()
                     // Count must be high enough to avoid "false positive": device producing a lot of errors but still present on the serial link
                     if (s->getErrorCount() > 16)
                     {
-                        TRACE_ERROR(HKX, "Device #%i has an error count too high and is going to be unregistered from its controller on '%s'...\n", id, serialGetCurrentDevice().c_str());
+                        TRACE_ERROR(HKX, "Device #%i has an error count too high and is going to be unregistered from its controller on '%s'...", id, serialGetCurrentDevice().c_str());
                         unregisterServo(s);
                         continue;
                     }
@@ -645,13 +649,13 @@ void HerkuleXController::run()
 #ifdef LATENCY_TIMER
         if ((loopd / 1000.0) > syncloopDuration)
         {
-            TRACE_WARNING(HKX, "Sync loop duration: %fms of the %fms budget.\n", (loopd / 1000.0), syncloopDuration);
+            TRACE_WARNING(HKX, "Sync loop duration: %fms of the %fms budget.", (loopd / 1000.0), syncloopDuration);
         }
         else
         {
-            TRACE_INFO(HKX, "Sync loop duration: %fms of the %fms budget.\n", (loopd / 1000.0), syncloopDuration);
+            TRACE_INFO(HKX, "Sync loop duration: %fms of the %fms budget.", (loopd / 1000.0), syncloopDuration);
         }
-#endif
+#endif // LATENCY_TIMER
 
         if (waitd > 0.0)
         {
@@ -660,5 +664,5 @@ void HerkuleXController::run()
         }
     }
 
-    TRACE_INFO(HKX, ">> THREAD (tid: '%i') termination by 'loop exit'\n", std::this_thread::get_id());
+    TRACE_INFO(HKX, ">> THREAD (tid: '%i') termination by 'loop exit'", std::this_thread::get_id());
 }
