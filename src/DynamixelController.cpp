@@ -156,6 +156,38 @@ void DynamixelController::disconnect()
     serialTerminate();
 }
 
+void DynamixelController::toggleGPIO(bool gpio_state)
+{
+  unsigned int *gpio_addr = NULL;
+  unsigned int *gpio_oe_addr = NULL;
+  unsigned int *gpio_setdataout_addr = NULL;
+  unsigned int *gpio_cleardataout_addr = NULL;
+  unsigned int reg;
+
+  int fd = open("/dev/mem", O_RDWR);
+  gpio_addr = (unsigned int *)mmap(0, GPIO1_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, GPIO1_START_ADDR);
+  gpio_oe_addr = gpio_addr + GPIO_OE;
+  gpio_setdataout_addr = gpio_addr + GPIO_SETDATAOUT;
+  gpio_cleardataout_addr = gpio_addr + GPIO_CLEARDATAOUT;
+
+  if(gpio_addr == MAP_FAILED) {
+     exit(1);
+  printf("ERROR WRITING GPIO\n", );
+  }
+
+  reg = *gpio_oe_addr;
+  reg = reg & (0xFFFFFFFF - PIN);
+  *gpio_oe_addr = reg;
+
+  if(gpio_state){
+   *gpio_setdataout_addr= PIN; //HIGH
+  }
+  else {
+   *gpio_cleardataout_addr = PIN; //LOW
+  }
+
+}
+
 std::string DynamixelController::serialGetCurrentDevice_wrapper()
 {
     return serialGetCurrentDevice();

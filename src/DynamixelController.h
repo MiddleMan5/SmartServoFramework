@@ -113,6 +113,8 @@ public:
     std::string serialGetCurrentDevice_wrapper();
     std::vector <std::string> serialGetAvailableDevices_wrapper();
     void serialSetLatency_wrapper(int latency);
+
+    void toggleGPIO(bool gpio_state);
 };
 
 /** @}*/

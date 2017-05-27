@@ -656,6 +656,7 @@ void SerialPortLinux::flush()
 
    if(gpio_addr == MAP_FAILED) {
        exit(1);
+   printf("ERROR WRITING GPIO\n", );
    }
 
    reg = *gpio_oe_addr;
